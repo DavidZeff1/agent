@@ -1,0 +1,5 @@
+# Minimal dependencies.
+groq>=0.11.0        # Groq LLM client (OpenAI-compatible chat + tool-calling)
+requests>=2.28.0    # HTTP for job-board APIs (bundles certifi -> works around macOS CA issues)
+flask>=3.0.0        # Local web app (python -m job_agent web)
+playwright>=1.40.0  # Form autofill in your own Chrome (channel="chrome"; no browser download)

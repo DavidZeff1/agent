@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Agent</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💼</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">💼 <span>Job Agent</span></div>
+    <nav id="nav">
+      <button class="navbtn" data-view="profile">Profile</button>
+      <button class="navbtn" data-view="find">Find jobs</button>
+      <button class="navbtn" data-view="apps">Applications</button>
+    </nav>
+    <button id="ai-chip" class="chip" title="AI settings">…</button>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============================== WELCOME ============================== -->
+  <section id="view-welcome" class="view" hidden>
+    <div class="hero card">
+      <h1>Apply to jobs in minutes, not hours.</h1>
+      <p class="lead">Job Agent searches real job boards, ranks the results against your background,
+      and prepares everything you need to apply — a resume, a cover letter, and ready-to-paste
+      answers for the application form.</p>
+      <ol class="steps">
+        <li><b>Tell us about yourself</b> — once. We save it on your computer.</li>
+        <li><b>Find jobs</b> — we search <span class="nboards">7</span> job boards and show the best matches first.</li>
+        <li><b>Pick the ones you like</b> — we prepare each application for you to review and send.</li>
+      </ol>
+      <button class="btn primary big" id="welcome-start">Set up my profile</button>
+      <p class="tiny muted">Your information never leaves this computer except to the job boards you search
+      and (optionally) the AI service that tailors your documents.</p>
+    </div>
+  </section>
+
+  <!-- ============================== PROFILE ============================== -->
+  <section id="view-profile" class="view" hidden>
+    <div class="view-head">
+      <h1>Your profile</h1>
+      <p class="muted">Fill this in once — every application is built from it. You can skip anything and come back later.</p>
+    </div>
+
+    <div class="card">
+      <h2>About you</h2>
+      <div class="grid2">
+        <label>Full name <input data-bind="full_name" placeholder="e.g. Jane Doe"></label>
+        <label>Preferred name <input data-bind="preferred_name" placeholder="What you like to be called"></label>
+      </div>
+      <label>Professional headline <input data-bind="headline" list="dl-titles" placeholder="Pick a title or type your own — e.g. Marketing Manager, Nurse"></label>
+      <label>A few sentences about yourself
+        <textarea data-bind="summary" rows="3" placeholder="What you do, how long you've done it, and what you're best at. This becomes your resume summary."></textarea>
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>Contact details</h2>
+      <div class="grid2">
+        <label>Email <input data-bind="contact.email" type="email" placeholder="you@example.com"></label>
+        <label>Phone <input data-bind="contact.phone" placeholder="+1 555 000 0000"></label>
+        <label>Address line 1 <input data-bind="contact.address_line1"></label>
+        <label>Address line 2 <input data-bind="contact.address_line2"></label>
+        <label>City <input data-bind="contact.city" list="dl-cities"></label>
+        <label>State / Region <input data-bind="contact.state" list="dl-states" placeholder="Pick or type"></label>
+        <label>Postal code <input data-bind="contact.postal_code"></label>
+        <label>Country <select data-bind="contact.country" data-options="countries"></select></label>
+      </div>
+      <label>Nationalities</label>
+      <div id="nationalities"></div>
+    </div>
+
+    <div class="card">
+      <h2>What are you looking for?</h2>
+      <label>Job titles you want</label>
+      <div id="desired_titles"></div>
+      <label>Preferred locations</label>
+      <div id="desired_locations"></div>
+      <div class="checks">
+        <label class="check"><input type="checkbox" data-bind="preferences.remote_ok"> Open to remote work</label>
+        <label class="check"><input type="checkbox" data-bind="preferences.onsite_ok"> Open to working on-site</label>
+        <label class="check"><input type="checkbox" data-bind="preferences.open_to_relocation"> Open to relocating</label>
+      </div>
+      <div class="grid3">
+        <label>Salary currency <select data-bind="preferences.salary_currency" data-options="currencies"></select></label>
+        <label>Minimum salary <select id="salary_min"></select></label>
+        <label>Target salary <select id="salary_max"></select></label>
+      </div>
+      <div class="grid2">
+        <label>Availability / notice period <select data-bind="preferences.availability" data-options="availability"></select></label>
+        <label>Earliest start date <input data-bind="preferences.earliest_start_date" type="date"></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Skills</h2>
+      <p class="tiny muted">Pick everything you're comfortable claiming in an interview — these are matched against job postings.</p>
+      <div id="skills"></div>
+    </div>
+
+    <div class="card"><h2>Work experience</h2><p class="tiny muted">Most recent first.</p><div id="list-experience"></div></div>
+    <div class="card"><h2>Education</h2><div id="list-education"></div></div>
+    <div class="card">
+      <h2>Projects <span class="opt">optional</span></h2>
+      <div class="row">
+        <input id="gh-user" class="growfield" placeholder="github.com/yourname">
+        <button class="btn" id="btn-gh-import" type="button">Import from GitHub</button>
+      </div>
+      <p class="tiny muted">We read your public repositories and write resume-ready descriptions from them
+      (better with AI on). Nothing is saved until you review and click Save profile.</p>
+      <div id="list-projects"></div>
+    </div>
+
+    <div class="card">
+      <h2>Links <span class="opt">optional</span></h2>
+      <div class="grid2">
+        <label>LinkedIn <input data-bind="links.linkedin" placeholder="https://linkedin.com/in/…"></label>
+        <label>GitHub <input data-bind="links.github" placeholder="https://github.com/…"></label>
+        <label>Portfolio <input data-bind="links.portfolio"></label>
+        <label>Personal website <input data-bind="links.website"></label>
+      </div>
+    </div>
+
+    <div class="card"><h2>Languages you speak</h2><div id="list-languages"></div></div>
+    <div class="card"><h2>Certifications <span class="opt">optional</span></h2><div id="list-certifications"></div></div>
+
+    <div class="card">
+      <h2>Work authorization</h2>
+      <p class="tiny muted">Where are you allowed to work? Applications ask this constantly — answer it once here.</p>
+      <div id="list-work_authorizations"></div>
+    </div>
+
+    <div class="card">
+      <h2>Saved answers <span class="opt">optional</span></h2>
+      <p class="tiny muted">Unusual questions you've been asked before (e.g. “How did you hear about us?”). Saved answers are reused automatically.</p>
+      <div id="list-additional"></div>
+    </div>
+
+    <details class="card slim">
+      <summary>Voluntary self-identification (optional, for EEO questions)</summary>
+      <div class="grid2" style="margin-top:12px">
+        <label>Gender <select data-bind="demographics.gender" data-options="eeoGender"></select></label>
+        <label>Pronouns <select data-bind="demographics.pronouns" data-options="eeoPronouns"></select></label>
+        <label>Race / ethnicity <select data-bind="demographics.race_ethnicity" data-options="eeoRace"></select></label>
+        <label>Veteran status <select data-bind="demographics.veteran_status" data-options="eeoVeteran"></select></label>
+        <label>Disability status <select data-bind="demographics.disability_status" data-options="eeoDisability"></select></label>
+      </div>
+    </details>
+
+    <div class="savebar">
+      <span id="save-hint" class="muted tiny"></span>
+      <button class="btn primary big" id="save-profile">Save profile</button>
+    </div>
+  </section>
+
+  <!-- ============================== FIND JOBS ============================== -->
+  <section id="view-find" class="view" hidden>
+    <div class="view-head">
+      <h1>Find jobs</h1>
+      <p class="muted">We search <span class="nboards">7</span> public job boards and rank everything against your profile.</p>
+    </div>
+
+    <div class="card searchbar">
+      <label>What are you looking for?
+        <input id="kw" list="dl-titles" placeholder="Pick a job title or type your own (separate several with commas)">
+      </label>
+      <div class="row">
+        <label class="growfield">Location <span class="opt">optional</span>
+          <input id="loc" list="dl-locations" placeholder="Leave empty for anywhere">
+        </label>
+        <label class="check pad-top"><input type="checkbox" id="remote" checked> Remote jobs</label>
+        <button class="btn primary" id="btn-search">Find jobs</button>
+      </div>
+    </div>
+
+    <div id="autorun-info" class="tiny muted" hidden style="margin:-8px 2px 14px"></div>
+
+    <div id="search-status" hidden class="card statuscard"><div class="spinner"></div><span id="search-status-text"></span></div>
+
+    <div id="results-head" hidden class="results-head">
+      <h2 id="results-count"></h2>
+      <span class="row" style="align-items:center">
+        <select id="filter" class="slim-select">
+          <option value="new">Show: new jobs</option>
+          <option value="all">Show: everything</option>
+        </select>
+        <button class="btn ghost" id="btn-rerank" hidden>✨ Improve ranking with AI <span class="tiny">(~1 min)</span></button>
+      </span>
+    </div>
+    <div id="results"></div>
+
+    <div id="selectbar" class="selectbar" hidden>
+      <label class="check light"><input type="checkbox" id="tailor" checked> Tailor each resume &amp; letter with AI</label>
+      <button class="btn primary big" id="btn-prepare">Prepare applications</button>
+    </div>
+  </section>
+
+  <!-- ============================== APPLICATIONS ============================== -->
+  <section id="view-apps" class="view" hidden>
+    <div class="view-head">
+      <h1>Your applications</h1>
+      <p class="muted">Everything is prepared for you — open the posting, paste, and hit their Apply button.</p>
+    </div>
+    <div id="apps-list"></div>
+  </section>
+
+  <!-- ============================== APPLICATION DETAIL ============================== -->
+  <section id="view-appdetail" class="view" hidden>
+    <button class="btn ghost" id="btn-back">← All applications</button>
+    <div class="view-head appdetail-head">
+      <div>
+        <h1 id="app-title"></h1>
+        <p class="muted" id="app-sub"></p>
+      </div>
+      <span class="row" style="align-items:center">
+        <label id="app-status-wrap" class="slim-label" hidden>Status
+          <select id="app-status" class="slim-select">
+            <option value="prepared">Prepared</option>
+            <option value="submitted">Submitted ✓</option>
+            <option value="interview">Interview 🎉</option>
+            <option value="rejected">Rejected</option>
+            <option value="skipped">Not applying</option>
+          </select>
+        </label>
+        <a id="app-open" class="btn primary big" target="_blank" rel="noopener">Open job posting ↗</a>
+      </span>
+    </div>
+
+    <div class="card">
+      <div class="cardhead">
+        <h2>Fill the form for me</h2>
+        <button class="btn primary" id="btn-autofill">🪄 Auto-fill in my browser</button>
+      </div>
+      <p class="tiny muted">Works when the posting uses Greenhouse or Lever (very common). A browser window
+      opens with your details, resume, and answers already filled in — you review, complete anything
+      highlighted, and click Submit yourself. Nothing is ever submitted automatically.</p>
+      <div id="autofill-result" hidden class="tiny"></div>
+    </div>
+
+    <div class="card howto">
+      <b>Or apply manually:</b> open the posting above, click <i>their</i> Apply button, and copy each piece below
+      into the form. Review everything before you submit.
+    </div>
+
+    <div class="card">
+      <h2>Form fields</h2>
+      <p class="tiny muted">The details application forms usually ask for — copy each one as you need it.</p>
+      <div id="app-fields"></div>
+    </div>
+
+    <div class="card" id="app-answers-card">
+      <h2>Questions they might ask</h2>
+      <div id="app-answers"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardhead">
+        <h2>Cover letter</h2>
+        <span>
+          <button class="btn small" data-copy="#app-cover">Copy</button>
+          <a class="btn small" id="dl-cover-pdf" hidden>Download PDF</a>
+          <button class="btn small" id="dl-cover">Download .txt</button>
+        </span>
+      </div>
+      <pre id="app-cover" class="doc"></pre>
+    </div>
+
+    <div class="card">
+      <div class="cardhead">
+        <h2>Resume</h2>
+        <span>
+          <button class="btn small" data-copy="#app-resume">Copy</button>
+          <a class="btn small" id="dl-resume-pdf" hidden>Download PDF</a>
+          <button class="btn small" id="dl-resume">Download .txt</button>
+        </span>
+      </div>
+      <p class="tiny muted">Upload the PDF where the form asks for a resume file; the text below pastes cleanly anywhere.</p>
+      <pre id="app-resume" class="doc"></pre>
+    </div>
+
+    <div class="card">
+      <h2>The form asks something else?</h2>
+      <p class="tiny muted">Paste the exact question — we answer it from your profile and never make things up.</p>
+      <div class="row">
+        <input id="qa-question" class="growfield" placeholder="e.g. Describe a time you led a difficult project.">
+        <button class="btn primary" id="btn-answer">Answer</button>
+      </div>
+      <div id="qa-result" hidden class="qa-result">
+        <pre id="qa-answer" class="doc"></pre>
+        <button class="btn small" data-copy="#qa-answer">Copy</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============================== SETTINGS MODAL ============================== -->
+<dialog id="settings">
+  <h2>AI settings</h2>
+  <p id="settings-status" class="muted"></p>
+  <p>With AI on, Job Agent tailors each resume and cover letter to the specific job, ranks matches more
+  intelligently, and answers unusual form questions. Everything still works without it — documents are just not tailored.</p>
+  <ol class="tiny">
+    <li>Open <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> (free)</li>
+    <li>Sign in and choose <b>API Keys → Create API Key</b></li>
+    <li>Paste the key here:</li>
+  </ol>
+  <div class="row">
+    <input id="key-input" class="growfield" type="password" placeholder="gsk_…" autocomplete="off">
+    <button class="btn primary" id="btn-save-key">Save &amp; test</button>
+  </div>
+  <p class="tiny muted">The key is stored on this computer only. <button class="linklike" id="btn-remove-key">Turn AI off</button></p>
+
+  <hr class="sep">
+  <h2>Automation</h2>
+  <label class="check"><input type="checkbox" id="set-autosearch"> Check the job boards automatically while the app is open</label>
+  <div class="grid3">
+    <label>How often
+      <select id="set-hours">
+        <option value="3">Every 3 hours</option>
+        <option value="6">Every 6 hours</option>
+        <option value="12">Every 12 hours</option>
+        <option value="24">Once a day</option>
+      </select>
+    </label>
+    <label>Auto-prepare applications
+      <select id="set-minscore">
+        <option value="0">Off</option>
+        <option value="60">Match 60+</option>
+        <option value="70">Match 70+</option>
+        <option value="80">Match 80+</option>
+      </select>
+    </label>
+    <label>Max per check
+      <select id="set-maxprep">
+        <option value="1">1</option>
+        <option value="3">3</option>
+        <option value="5">5</option>
+        <option value="10">10</option>
+      </select>
+    </label>
+  </div>
+  <p class="tiny muted">Auto-prepare builds the full application packet (resume, letter, answers) for new jobs
+  that score above the threshold — ready and waiting under Applications.</p>
+  <div class="row" style="margin-top:8px">
+    <button class="btn" id="btn-save-settings">Save automation settings</button>
+    <button class="btn ghost" id="btn-run-now">Check for new jobs now</button>
+  </div>
+
+  <button class="btn ghost close" id="btn-close-settings">Close</button>
+</dialog>
+
+<!-- ============================== PROGRESS MODAL ============================== -->
+<dialog id="progress">
+  <h2 id="progress-title">Preparing applications…</h2>
+  <div class="bar"><div id="progress-fill"></div></div>
+  <p id="progress-text" class="muted"></p>
+  <p id="progress-detail" class="tiny muted"></p>
+</dialog>
+
+<div id="toasts"></div>
+
+<script src="catalogs.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

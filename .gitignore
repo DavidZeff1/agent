@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+# local runtime state (also lives in ~/.job_agent by default)
+.job_agent/
+profile.json
+jobs_cache.json
+ranked.json
+selection.json
+applications/
