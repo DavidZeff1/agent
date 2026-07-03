@@ -40,6 +40,16 @@ asks something unusual, type the question into the app and it answers from your 
 From a terminal the same app is `python -m job_agent web --open`. Everything below — the CLI —
 does the same things scriptably and remains fully supported.
 
+### Hosting it on Vercel
+
+The repo deploys to Vercel as-is (`app.py` is the entrypoint). Hosted, the server is
+**stateless**: each visitor's profile, API key, job history, and prepared applications live
+in their own browser (localStorage), and the key is pasted in the app's Settings — nothing
+is stored server-side. Machine-bound features are hidden with in-app explanations: form
+autofill and background auto-search need the desktop version, and PDFs become a
+"Print / save as PDF" button. Don't set `GROQ_API_KEY` as a Vercel env var unless you're
+happy for every visitor to spend your quota — without it, each visitor uses their own key.
+
 ---
 
 ## Why this design (read this first)

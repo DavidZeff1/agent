@@ -113,7 +113,7 @@ def _context(headless: bool):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
-        raise RuntimeError("Playwright is not installed. Run: pip install -r requirements.txt") from e
+        raise RuntimeError("Playwright is not installed. Run: pip install playwright") from e
     pw = _state.get("pw") or sync_playwright().start()
     _state["pw"] = pw
     profile_dir = str(get_settings().ensure_home().home / "browser")

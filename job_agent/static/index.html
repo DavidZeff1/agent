@@ -265,6 +265,7 @@
         <span>
           <button class="btn small" data-copy="#app-cover">Copy</button>
           <a class="btn small" id="dl-cover-pdf" hidden>Download PDF</a>
+          <button class="btn small" id="print-cover" hidden>Print / save as PDF</button>
           <button class="btn small" id="dl-cover">Download .txt</button>
         </span>
       </div>
@@ -277,6 +278,7 @@
         <span>
           <button class="btn small" data-copy="#app-resume">Copy</button>
           <a class="btn small" id="dl-resume-pdf" hidden>Download PDF</a>
+          <button class="btn small" id="print-resume" hidden>Print / save as PDF</button>
           <button class="btn small" id="dl-resume">Download .txt</button>
         </span>
       </div>
@@ -317,6 +319,7 @@
   </div>
   <p class="tiny muted">The key is stored on this computer only. <button class="linklike" id="btn-remove-key">Turn AI off</button></p>
 
+  <div id="automation-block">
   <hr class="sep">
   <h2>Automation</h2>
   <label class="check"><input type="checkbox" id="set-autosearch"> Check the job boards automatically while the app is open</label>
@@ -351,6 +354,7 @@
   <div class="row" style="margin-top:8px">
     <button class="btn" id="btn-save-settings">Save automation settings</button>
     <button class="btn ghost" id="btn-run-now">Check for new jobs now</button>
+  </div>
   </div>
 
   <button class="btn ghost close" id="btn-close-settings">Close</button>

@@ -10,7 +10,7 @@ if [ ! -x .venv/bin/python ]; then
   .venv/bin/pip install --quiet -r requirements.txt
 fi
 
-# Pick up newly added dependencies after an update.
-.venv/bin/python -c "import flask, groq, requests" 2>/dev/null || .venv/bin/pip install --quiet -r requirements.txt
+# Pick up newly added dependencies after an update (playwright powers form autofill).
+.venv/bin/python -c "import flask, groq, requests, playwright" 2>/dev/null || .venv/bin/pip install --quiet -r requirements.txt playwright
 
 exec .venv/bin/python -m job_agent web --open

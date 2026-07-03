@@ -20,10 +20,27 @@ const STATUS_LABELS = { new: '', skipped: 'skipped', prepared: 'prepared',
 
 /* ---------------- tiny helpers ---------------- */
 
+/* Hosted mode (Vercel): the server is stateless, so profile / API key / job statuses /
+   prepared applications all live in this browser's localStorage. */
+const HOSTED = () => !!STATUS.hosted;
+function lsGet(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch (e) { return fallback; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); }
+  catch (e) { toast('Could not save in this browser (storage full or blocked).', true); }
+}
+let SEEN = {};      // hosted: job id -> status
+let APPS_LS = [];   // hosted: prepared application packets
+
 async function api(path, opts = {}) {
+  const headers = {};
+  const key = localStorage.getItem('ja_key');
+  if (key) headers['X-Groq-Key'] = key.replace(/^"|"$/g, '');
   const init = opts.body !== undefined
-    ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts.body) }
-    : {};
+    ? { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(opts.body) }
+    : { headers };
   const res = await fetch('/api/' + path, init);
   let data = null;
   try { data = await res.json(); } catch (e) { /* non-JSON error page */ }
@@ -476,7 +493,12 @@ async function saveProfile() {
   const btn = $('#save-profile');
   btn.disabled = true;
   try {
-    const r = await api('profile', { body: P });
+    if (HOSTED()) {
+      if (!(P.full_name || P.preferred_name)) throw new Error('Please enter your name before saving.');
+      lsSet('ja_profile', P);  // hosted: the profile lives in this browser only
+    } else {
+      await api('profile', { body: P });
+    }
     STATUS.has_profile = true;
     toast('Profile saved ✓');
     $('#save-hint').textContent = 'Saved. Next: Find jobs →';
@@ -505,12 +527,23 @@ async function doSearch() {
   SELECTED.clear();
   updateSelectbar();
   try {
-    const data = await api('search', { body: { keywords, location: $('#loc').value.trim(), remote: $('#remote').checked, limit: 30 } });
+    const body = { keywords, location: $('#loc').value.trim(), remote: $('#remote').checked, limit: 30 };
+    if (HOSTED()) body.profile = P;
+    const data = await api('search', { body });
     RESULTS = data.results;
+    let newCount = data.new;
+    if (HOSTED()) {  // job history lives in this browser
+      newCount = 0;
+      for (const r of RESULTS) {
+        if (!SEEN[r.job.id]) { SEEN[r.job.id] = 'new'; newCount++; }
+        r.status = SEEN[r.job.id];
+      }
+      lsSet('ja_seen', SEEN);
+    }
     RERANKED = false;
     renderResults();
-    if (data.new === 0 && RESULTS.length) toast('No new jobs since last time — everything here you\'ve already seen.');
-    else if (data.new > 0) toast(`${data.new} new job${data.new > 1 ? 's' : ''} since last time`);
+    if (newCount === 0 && RESULTS.length) toast('No new jobs since last time — everything here you\'ve already seen.');
+    else if (newCount > 0) toast(`${newCount} new job${newCount > 1 ? 's' : ''} since last time`);
   } catch (e) {
     toast(e.message, true);
   } finally {
@@ -522,7 +555,7 @@ async function doSearch() {
 function renderAutorunInfo() {
   const a = STATUS.autorun || {};
   const elx = $('#autorun-info');
-  if (!a.ran_at) { elx.hidden = true; return; }
+  if (HOSTED() || !a.ran_at) { elx.hidden = true; return; }
   elx.hidden = false;
   let txt = `Last automatic check: ${timeAgo(a.ran_at)} — ${a.found} jobs, ${a.new} new` +
     (a.prepared ? `, ${a.prepared} application${a.prepared > 1 ? 's' : ''} auto-prepared` : '');
@@ -535,8 +568,10 @@ async function doRerank() {
   btn.disabled = true;
   searchStatus('Asking the AI to look closely at your top matches… about a minute.');
   try {
-    const data = await api('rerank', { body: {} });
+    const body = HOSTED() ? { profile: P, jobs: RESULTS.map(r => r.job) } : {};
+    const data = await api('rerank', { body });
     RESULTS = data.results;
+    if (HOSTED()) RESULTS.forEach(r => { r.status = SEEN[r.job.id] || 'new'; });
     RERANKED = true;
     renderResults();
     toast('Ranking improved with AI ✓');
@@ -635,6 +670,7 @@ function jobCard(r) {
       r.status = 'skipped';
       SELECTED.delete(j.id);
       renderResults();
+      if (HOSTED()) { SEEN[j.id] = 'skipped'; lsSet('ja_seen', SEEN); return; }
       try {
         await api('track', { body: { job_id: j.id, status: 'skipped', title: j.title, company: j.company, url: j.url } });
       } catch (e) { toast(e.message, true); }
@@ -662,7 +698,8 @@ async function doPrepare() {
   const dlg = $('#progress');
   dlg.showModal();
   // Poll the server's one-line status so the user sees what the AI is doing right now.
-  const poll = setInterval(async () => {
+  // (Hosted: each request runs on its own serverless instance, so there's nothing to poll.)
+  const poll = HOSTED() ? 0 : setInterval(async () => {
     try {
       const p = await api('progress');
       $('#progress-detail').textContent = p.text || '';
@@ -679,7 +716,17 @@ async function doPrepare() {
       const id = ids[next++];
       const r = RESULTS.find(x => x.job.id === id);
       try {
-        await api('apply', { body: { job_id: id, tailor } });
+        const body = { job_id: id, tailor };
+        if (HOSTED()) { body.job = r.job; body.profile = P; body.inline = true; }
+        const resp = await api('apply', { body });
+        if (HOSTED() && resp.packet) {
+          APPS_LS = APPS_LS.filter(p => (p.job || {}).id !== id);
+          APPS_LS.unshift({ ...resp.packet, created: Math.floor(Date.now() / 1000) });
+          APPS_LS = APPS_LS.slice(0, 25);  // stay well inside browser storage limits
+          lsSet('ja_apps', APPS_LS);
+          SEEN[id] = 'prepared';
+          lsSet('ja_seen', SEEN);
+        }
         ok++;
       } catch (e) {
         fail++;
@@ -709,6 +756,19 @@ async function doPrepare() {
 /* ---------------- applications ---------------- */
 
 async function loadApps() {
+  if (HOSTED()) {
+    APPS = APPS_LS.map(p => ({
+      folder: (p.job || {}).id || '',
+      title: (p.job || {}).title || 'Application',
+      company: (p.job || {}).company || '',
+      url: (p.job || {}).url || '',
+      tailored: !!p.tailored,
+      status: SEEN[(p.job || {}).id] || 'prepared',
+      created: p.created || 0,
+    }));
+    renderApps();
+    return;
+  }
   try {
     const d = await api('applications');
     APPS = d.applications;
@@ -742,6 +802,28 @@ function renderApps() {
 }
 
 async function openApp(folder) {
+  if (HOSTED()) {
+    const p = APPS_LS.find(x => (x.job || {}).id === folder);
+    if (!p) { toast('That application is no longer stored in this browser.', true); return; }
+    CURRENT_APP = {
+      folder,
+      job: p.job || {},
+      tailored: !!p.tailored,
+      review: p.review || {},
+      status: SEEN[folder] || 'prepared',
+      fields: p.fields || {},
+      common_answers: p.common_answers || {},
+      resume_txt: p.resume_txt || '',
+      resume_md: p.resume_md || '',
+      cover_letter: p.cover_letter || '',
+      resume_html: p.resume_html || '',
+      letter_html: p.letter_html || '',
+      files: {},
+    };
+    renderAppDetail();
+    switchView('appdetail');
+    return;
+  }
   try {
     CURRENT_APP = await api('application/' + encodeURIComponent(folder));
   } catch (e) {
@@ -750,6 +832,15 @@ async function openApp(folder) {
   }
   renderAppDetail();
   switchView('appdetail');
+}
+
+function printDoc(html, title) {
+  const w = window.open('', '_blank');
+  if (!w) { toast('Your browser blocked the print window — allow pop-ups for this site.', true); return; }
+  w.document.write(html);
+  w.document.title = title;
+  w.document.close();
+  setTimeout(() => w.print(), 400);
 }
 
 function renderAppDetail() {
@@ -814,13 +905,35 @@ function renderAppDetail() {
     sel.value = ['prepared', 'submitted', 'interview', 'rejected', 'skipped'].includes(d.status) ? d.status : 'prepared';
     sel.onchange = async () => {
       try {
-        await api('track', { body: { job_id: d.job.id, status: sel.value, title: d.job.title, company: d.job.company, url: d.job.url } });
+        if (HOSTED()) {
+          SEEN[d.job.id] = sel.value;
+          lsSet('ja_seen', SEEN);
+        } else {
+          await api('track', { body: { job_id: d.job.id, status: sel.value, title: d.job.title, company: d.job.company, url: d.job.url } });
+        }
         const item = APPS.find(a => a.folder === d.folder);
         if (item) item.status = sel.value;
         toast(sel.value === 'submitted' ? 'Marked as submitted ✓ — it won\'t show up as new again.' : 'Status saved ✓');
         renderApps();
       } catch (e) { toast(e.message, true); }
     };
+  }
+
+  // Hosted mode: no server-made PDFs or desktop autofill — print-to-PDF instead.
+  const canPrint = !!(d.resume_html || d.letter_html);
+  $('#print-resume').hidden = !canPrint;
+  $('#print-cover').hidden = !canPrint;
+  if (canPrint) {
+    $('#print-resume').onclick = () => printDoc(d.resume_html, 'Resume - ' + (P.full_name || 'me'));
+    $('#print-cover').onclick = () => printDoc(d.letter_html, 'Cover letter - ' + (d.job.company || 'job'));
+  }
+  const afBtn = $('#btn-autofill');
+  afBtn.hidden = HOSTED();
+  if (HOSTED()) {
+    $('#autofill-result').hidden = false;
+    $('#autofill-result').textContent =
+      'Auto-fill runs in the desktop version — it opens and fills the employer\'s form in your own '
+      + 'browser, which a website can\'t do. Use the copy buttons below instead.';
   }
   $('#qa-question').value = '';
   $('#qa-result').hidden = true;
@@ -857,7 +970,9 @@ async function doAnswer() {
   btn.disabled = true;
   btn.textContent = 'Thinking…';
   try {
-    const d = await api('answer', { body: { question: q } });
+    const body = { question: q };
+    if (HOSTED()) body.profile = P;
+    const d = await api('answer', { body });
     let text = d.answer;
     if (text === 'NOT IN PROFILE') {
       text = "That isn't in your profile yet. Add it under Profile → Saved answers, then ask again.";
@@ -878,6 +993,7 @@ function openSettings() {
   $('#settings-status').textContent = STATUS.ai
     ? 'AI is on ✓  (free Groq account, model: ' + STATUS.model + ')'
     : 'AI is currently off — matching still works, documents are just not tailored.';
+  $('#automation-block').hidden = HOSTED();  // needs a computer that stays on; not available hosted
   $('#key-input').value = '';
   const s = STATUS.settings || {};
   $('#set-autosearch').checked = !!s.autosearch;
@@ -931,13 +1047,18 @@ async function saveKey(key) {
   btn.disabled = true;
   btn.textContent = 'Testing…';
   try {
-    const d = await api('settings/key', { body: { key } });
+    const d = await api('settings/key', { body: { key } });  // server validates with a live call
+    if (HOSTED()) {  // hosted: the key stays in this browser and rides along on each request
+      if (key) localStorage.setItem('ja_key', key);
+      else localStorage.removeItem('ja_key');
+    }
     STATUS.ai = d.ai;
     renderHeader();
     toast(d.message || 'Saved ✓');
     $('#settings').close();
   } catch (e) {
     STATUS.ai = false;
+    if (HOSTED()) localStorage.removeItem('ja_key');
     renderHeader();
     toast(e.message, true);
   } finally {
@@ -959,7 +1080,14 @@ async function init() {
   $$('.nboards').forEach(n => { n.textContent = STATUS.sources || 7; });
   buildDatalists();
   populateStaticSelects();
-  P = await api('profile');
+  if (HOSTED()) {
+    SEEN = lsGet('ja_seen', {});
+    APPS_LS = lsGet('ja_apps', []);
+    P = lsGet('ja_profile', null) || await api('profile');  // server returns an empty template
+    STATUS.has_profile = !!(P.full_name || (P.skills || []).length);
+  } else {
+    P = await api('profile');
+  }
   ADD = Object.entries(P.additional || {});
   bindInputs();
   EDITORS.forEach(renderEditor);
@@ -1012,14 +1140,17 @@ async function init() {
   } else {
     $('#kw').value = (P.preferences.desired_titles || []).join(', ');
     switchView('find');
-    // show the last saved ranking right away (auto-search keeps this fresh)
-    try {
-      const d = await api('results');
-      if (d.results.length) {
-        RESULTS = d.results;
-        renderResults();
-      }
-    } catch (e) { /* no saved results yet */ }
+    // show the last saved ranking right away (local mode: auto-search keeps this fresh;
+    // hosted mode has no server-side memory, so the user just searches)
+    if (!HOSTED()) {
+      try {
+        const d = await api('results');
+        if (d.results.length) {
+          RESULTS = d.results;
+          renderResults();
+        }
+      } catch (e) { /* no saved results yet */ }
+    }
   }
 }
 

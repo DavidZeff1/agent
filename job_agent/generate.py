@@ -640,4 +640,14 @@ def generate_application(profile: Profile, job: Job, out_dir, llm=None, progress
     }
     paths["answers_json"] = util.write_json(os.path.join(folder, "answers.json"), answers)
     paths["tailored"] = tailoring is not None
+    # Full document text, for callers that can't read the files back (hosted mode keeps
+    # packets in the browser; resume_html/letter_html power its print-to-PDF).
+    paths["content"] = {
+        "resume_md": resume_md,
+        "resume_txt": resume_txt,
+        "resume_html": render_resume_html(profile, tailoring),
+        "cover_letter": cover,
+        "letter_html": render_letter_html(profile, cover),
+        "form_md": packet,
+    }
     return paths

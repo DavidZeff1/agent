@@ -23,7 +23,7 @@ from . import generate as gen
 from . import matching
 from . import profile_store as ps
 from . import scraper, tracker, util
-from .config import get_settings, home
+from .config import IS_HOSTED, get_settings, home
 from .llm import GroqLLM, LLMError, get_llm, llm_available
 from .profile_store import Profile
 from .scraper import Job
@@ -136,7 +136,26 @@ def _scheduler_loop() -> None:
 
 def _ctx(want_llm: bool = True) -> Context:
     profile = ps.load_profile() or Profile()
-    return Context(profile=profile, llm=get_llm(optional=True) if want_llm else None)
+    return Context(profile=profile, llm=_req_llm() if want_llm else None)
+
+
+def _req_llm(optional: bool = True):
+    """LLM for this request: a key pasted in the app (X-Groq-Key header) wins over the env.
+    In hosted mode each visitor brings their own key this way — nothing is stored server-side."""
+    key = (request.headers.get("X-Groq-Key") or "").strip()
+    if key:
+        try:
+            return GroqLLM(api_key=key)
+        except LLMError:
+            pass
+    return get_llm(optional=optional)
+
+
+def _profile_from(data: dict) -> Profile:
+    """Profile for this request: inline from the browser (hosted mode) or from disk (local)."""
+    if isinstance(data.get("profile"), dict):
+        return Profile.from_dict(data["profile"])
+    return ps.load_profile() or Profile()
 
 
 def _ranked_payload(ranked: list[dict]) -> list[dict]:
@@ -161,9 +180,13 @@ def _ranked_payload(ranked: list[dict]) -> list[dict]:
                 "location": j.get("location", ""),
                 "salary": j.get("salary", ""),
                 "url": j.get("url", ""),
+                "apply_url": j.get("apply_url", ""),
                 "source": j.get("source", ""),
                 "date": (j.get("date") or "")[:10],
                 "description_preview": util.truncate(j.get("description", ""), 900),
+                # Hosted mode has no server-side cache, so the browser keeps the full
+                # description and sends it back when preparing an application.
+                **({"description": j.get("description", "")} if IS_HOSTED else {}),
             },
         })
     return out
@@ -197,9 +220,10 @@ def create_app() -> Flask:
         profile = ps.load_profile()
         s = get_settings()
         return jsonify({
+            "hosted": IS_HOSTED,
             "has_profile": bool(profile and (profile.full_name or profile.skills)),
             "name": (profile.preferred_name or profile.full_name) if profile else "",
-            "ai": llm_available(),
+            "ai": bool((request.headers.get("X-Groq-Key") or "").strip()) or llm_available(),
             "model": s.model,
             "home": str(s.home),
             "sources": len(scraper.SOURCES),
@@ -251,11 +275,14 @@ def create_app() -> Flask:
     def save_key():
         data = request.get_json(force=True, silent=True) or {}
         key = str(data.get("key", "")).strip()
-        _write_env_key(key)
+        if not IS_HOSTED:  # hosted mode never stores keys server-side; the browser keeps them
+            _write_env_key(key)
         if not key:
-            os.environ.pop("GROQ_API_KEY", None)
+            if not IS_HOSTED:
+                os.environ.pop("GROQ_API_KEY", None)
             return jsonify({"ok": True, "ai": False, "message": "AI features turned off."})
-        os.environ["GROQ_API_KEY"] = key
+        if not IS_HOSTED:
+            os.environ["GROQ_API_KEY"] = key
         try:  # one tiny live call so the user knows right away whether the key works
             GroqLLM(api_key=key, max_retries=1).complete("Reply with the word OK.", "ping", max_tokens=8)
         except LLMError as e:
@@ -300,7 +327,7 @@ def create_app() -> Flask:
             return jsonify({"error": f"No public projects found on github.com/{username}."}), 404
         _set_progress("Writing project descriptions from your GitHub…")
         try:
-            projects = gh.to_projects(repos, llm=get_llm(optional=True))
+            projects = gh.to_projects(repos, llm=_req_llm())
         finally:
             _set_progress("")
         return jsonify({"ok": True, "username": username, "projects": projects})
@@ -310,7 +337,7 @@ def create_app() -> Flask:
     @app.post("/api/search")
     def search():
         data = request.get_json(force=True, silent=True) or {}
-        c = _ctx(want_llm=False)
+        c = Context(profile=_profile_from(data), llm=None)
         keywords = [str(k).strip() for k in (data.get("keywords") or []) if str(k).strip()]
         if not keywords:
             keywords = ps.default_keywords(c.profile)
@@ -332,13 +359,18 @@ def create_app() -> Flask:
 
     @app.post("/api/rerank")
     def rerank():
-        c = _ctx()
-        if c.llm is None:
+        data = request.get_json(force=True, silent=True) or {}
+        llm = _req_llm()
+        if llm is None:
             return jsonify({"error": "Add your free AI key in Settings to use smart ranking."}), 400
-        jobs = c.load_jobs()
+        c = Context(profile=_profile_from(data), llm=llm)
+        if isinstance(data.get("jobs"), list):  # hosted mode: the browser holds the jobs
+            jobs = [Job.from_dict(j) for j in data["jobs"] if isinstance(j, dict)]
+        else:
+            jobs = c.load_jobs()
         if not jobs:
             return jsonify({"error": "Search for jobs first."}), 400
-        ranked = matching.rank_jobs(c.profile, jobs, use_llm=True, llm=c.llm)
+        ranked = matching.rank_jobs(c.profile, jobs, use_llm=True, llm=llm)
         c.save_ranked(ranked)
         return jsonify({"count": len(ranked), "results": _ranked_payload(ranked)})
 
@@ -349,27 +381,36 @@ def create_app() -> Flask:
         data = request.get_json(force=True, silent=True) or {}
         job_id = str(data.get("job_id", ""))
         want_tailor = bool(data.get("tailor", True))
-        c = _ctx(want_llm=want_tailor)
-        by_id = {e["job"]["id"]: e["job"] for e in c.load_ranked()}
-        if not by_id:
-            by_id = {j.id: j.to_dict() for j in c.load_jobs()}
-        if job_id not in by_id:
-            return jsonify({"error": "That job is no longer in the current search. Search again."}), 404
-        job = Job.from_dict(by_id[job_id])
-        c.settings.ensure_home()
+        profile = _profile_from(data)
+        if isinstance(data.get("job"), dict):  # hosted mode: the browser holds the job
+            job = Job.from_dict(data["job"])
+        else:
+            c = _ctx(want_llm=False)
+            by_id = {e["job"]["id"]: e["job"] for e in c.load_ranked()}
+            if not by_id:
+                by_id = {j.id: j.to_dict() for j in c.load_jobs()}
+            if job_id not in by_id:
+                return jsonify({"error": "That job is no longer in the current search. Search again."}), 404
+            job = Job.from_dict(by_id[job_id])
+        s = get_settings().ensure_home()
         _set_progress(f"Reading the {job.company} posting…")
         try:
-            paths = gen.generate_application(c.profile, job, c.settings.applications_dir,
-                                             llm=c.llm, progress=_set_progress)
+            paths = gen.generate_application(profile, job, s.applications_dir,
+                                             llm=_req_llm() if want_tailor else None,
+                                             progress=_set_progress)
         finally:
             _set_progress("")
         tracker.set_status(job.id, "prepared", title=job.title, company=job.company, url=job.url)
-        return jsonify({
+        resp = {
             "ok": True,
             "tailored": paths["tailored"],
             "folder": os.path.basename(paths["dir"]),
             "job": f"{job.title} @ {job.company}",
-        })
+        }
+        if data.get("inline"):  # hosted mode: return the whole packet for browser storage
+            meta = util.read_json(paths["answers_json"], default={}) or {}
+            resp["packet"] = {**meta, **paths.get("content", {})}
+        return jsonify(resp)
 
     @app.get("/api/applications")
     def applications():
@@ -435,6 +476,9 @@ def create_app() -> Flask:
 
     @app.post("/api/autofill")
     def autofill_():
+        if IS_HOSTED:
+            return jsonify({"error": "Auto-fill needs the desktop version — it opens and fills "
+                                     "the form in your own browser, which a website can't do."}), 400
         data = request.get_json(force=True, silent=True) or {}
         name = str(data.get("folder", ""))
         d = get_settings().applications_dir.resolve()
@@ -469,9 +513,11 @@ def create_app() -> Flask:
         question = str(data.get("question", "")).strip()
         if not question:
             return jsonify({"error": "Type a question first."}), 400
-        c = _ctx()
-        ans = ps.answer_question(c.profile, question, llm=c.llm)
-        return jsonify({"answer": ans, "ai": c.llm is not None})
+        profile = _profile_from(data)
+        llm = _req_llm()
+        # Only cache answers back into the profile when it lives on this machine.
+        ans = ps.answer_question(profile, question, llm=llm, save="profile" not in data)
+        return jsonify({"answer": ans, "ai": llm is not None})
 
     return app
 

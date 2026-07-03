@@ -39,8 +39,14 @@ def _load_dotenv(paths) -> None:
             continue
 
 
+# Hosted mode (e.g. Vercel): stateless serverless functions with a read-only filesystem.
+# State lives in each visitor's browser; /tmp is only used as scratch space.
+IS_HOSTED = bool(os.environ.get("VERCEL"))
+
+
 def home() -> Path:
-    return Path(os.environ.get("JOB_AGENT_HOME", str(Path.home() / ".job_agent"))).expanduser()
+    default = "/tmp/job_agent" if IS_HOSTED else str(Path.home() / ".job_agent")
+    return Path(os.environ.get("JOB_AGENT_HOME", default)).expanduser()
 
 
 # Load .env once, before any settings are read.
