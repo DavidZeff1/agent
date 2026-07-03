@@ -96,7 +96,7 @@ def _get_json(sess: requests.Session, url: str, params: dict | None = None):
 # ----------------------------------------------------------------------------
 
 
-def fetch_remotive(sess, keywords: str, limit: int) -> List[Job]:
+def fetch_remotive(sess, keywords: str, limit: int, opts=None) -> List[Job]:
     try:
         data = _get_json(sess, "https://remotive.com/api/remote-jobs",
                          {"search": keywords, "limit": max(limit, 20)})
@@ -122,7 +122,7 @@ def fetch_remotive(sess, keywords: str, limit: int) -> List[Job]:
         return []
 
 
-def fetch_remoteok(sess, keywords: str, limit: int) -> List[Job]:
+def fetch_remoteok(sess, keywords: str, limit: int, opts=None) -> List[Job]:
     try:
         data = _get_json(sess, "https://remoteok.com/api")
         jobs = []
@@ -149,7 +149,7 @@ def fetch_remoteok(sess, keywords: str, limit: int) -> List[Job]:
         return []
 
 
-def fetch_arbeitnow(sess, keywords: str, limit: int) -> List[Job]:
+def fetch_arbeitnow(sess, keywords: str, limit: int, opts=None) -> List[Job]:
     jobs: List[Job] = []
     try:
         for page in range(1, 4):  # the feed is paginated (100/page); no server-side search
@@ -180,7 +180,7 @@ def fetch_arbeitnow(sess, keywords: str, limit: int) -> List[Job]:
         return []
 
 
-def fetch_jobicy(sess, keywords: str, limit: int) -> List[Job]:
+def fetch_jobicy(sess, keywords: str, limit: int, opts=None) -> List[Job]:
     """Jobicy has real server-side keyword search, so query each term separately."""
     terms = [t for t in keywords.split() if t][:3] or [""]
     jobs: List[Job] = []
@@ -214,7 +214,7 @@ def fetch_jobicy(sess, keywords: str, limit: int) -> List[Job]:
     return jobs
 
 
-def fetch_himalayas(sess, keywords: str, limit: int) -> List[Job]:
+def fetch_himalayas(sess, keywords: str, limit: int, opts=None) -> List[Job]:
     try:
         data = _get_json(sess, "https://himalayas.app/jobs/api", {"limit": min(max(limit, 20), 100)})
         jobs = []
@@ -249,7 +249,7 @@ def fetch_himalayas(sess, keywords: str, limit: int) -> List[Job]:
         return []
 
 
-def fetch_weworkremotely(sess, keywords: str, limit: int) -> List[Job]:
+def fetch_weworkremotely(sess, keywords: str, limit: int, opts=None) -> List[Job]:
     try:
         import xml.etree.ElementTree as ET
 
@@ -286,7 +286,7 @@ def fetch_weworkremotely(sess, keywords: str, limit: int) -> List[Job]:
 _LOCATION_FIRST = re.compile(r",\s*[A-Z]{2}\b|^(remote|usa|us\b|uk\b|eu\b|emea|worldwide|global)", re.I)
 
 
-def fetch_hn_hiring(sess, keywords: str, limit: int) -> List[Job]:
+def fetch_hn_hiring(sess, keywords: str, limit: int, opts=None) -> List[Job]:
     """The latest 'Ask HN: Who is hiring?' thread — each top-level comment is a posting.
 
     The conventional first line is 'Company | Role | Location | ...' but authors improvise,
@@ -333,6 +333,216 @@ def fetch_hn_hiring(sess, keywords: str, limit: int) -> List[Job]:
         return []
 
 
+def fetch_themuse(sess, keywords: str, limit: int, opts=None) -> List[Job]:
+    """The Muse public API (keyless, mostly US/EU on-site + hybrid roles)."""
+    jobs: List[Job] = []
+    try:
+        for page in range(1, 3):
+            data = _get_json(sess, "https://www.themuse.com/api/public/jobs", {"page": page})
+            for j in data.get("results", []):
+                locs = ", ".join(x.get("name", "") for x in (j.get("locations") or [])[:3])
+                jobs.append(Job(
+                    id=_make_id("themuse", (j.get("refs") or {}).get("landing_page", ""),
+                                j.get("name", ""), (j.get("company") or {}).get("name", "")),
+                    source="themuse",
+                    title=(j.get("name") or "").strip(),
+                    company=((j.get("company") or {}).get("name") or "").strip(),
+                    location=locs,
+                    remote="flexible" in locs.lower() or "remote" in locs.lower(),
+                    url=(j.get("refs") or {}).get("landing_page", ""),
+                    apply_url=(j.get("refs") or {}).get("landing_page", ""),
+                    description=util.html_to_text(j.get("contents") or ""),
+                    tags=[c.get("name", "") for c in (j.get("categories") or []) if c.get("name")],
+                    salary="",
+                    date=(j.get("publication_date") or "")[:10],
+                ))
+            if page >= data.get("page_count", 1):
+                break
+        return jobs
+    except Exception as e:  # noqa: BLE001
+        if jobs:
+            return jobs
+        print(f"  [warn] themuse source failed: {e}")
+        return []
+
+
+def fetch_jooble(sess, keywords: str, limit: int, opts=None) -> List[Job]:
+    """Jooble aggregator (~69 countries incl. Israel). Activates when a free API key is set."""
+    opts = opts or {}
+    key = str((opts.get("config") or {}).get("jooble_key", "")).strip()
+    if not key:
+        return []  # not configured — quietly do nothing
+    try:
+        where = opts.get("location") or opts.get("country") or ""
+        resp = sess.post(f"https://jooble.org/api/{key}",
+                         json={"keywords": keywords, "location": where, "page": 1},
+                         timeout=get_settings().request_timeout)
+        resp.raise_for_status()
+        jobs = []
+        for j in resp.json().get("jobs", []):
+            loc = (j.get("location") or "").strip()
+            jobs.append(Job(
+                id=_make_id("jooble", j.get("link", ""), j.get("title", ""), j.get("company", "")),
+                source="jooble",
+                title=(j.get("title") or "").strip(),
+                company=(j.get("company") or "").strip(),
+                location=loc,
+                remote="remote" in f"{j.get('title', '')} {loc}".lower() or None,
+                url=j.get("link", ""),
+                apply_url=j.get("link", ""),
+                description=util.html_to_text(j.get("snippet") or ""),
+                tags=[t for t in [j.get("type")] if t],
+                salary=(str(j.get("salary")) if j.get("salary") else "").strip(),
+                date=(j.get("updated") or "")[:10],
+            ))
+        return jobs
+    except Exception as e:  # noqa: BLE001
+        print(f"  [warn] jooble source failed: {e}")
+        return []
+
+
+_ADZUNA_COUNTRIES = {
+    "united states": "us", "usa": "us", "united kingdom": "gb", "uk": "gb", "austria": "at",
+    "australia": "au", "belgium": "be", "brazil": "br", "canada": "ca", "switzerland": "ch",
+    "germany": "de", "spain": "es", "france": "fr", "india": "in", "italy": "it",
+    "mexico": "mx", "netherlands": "nl", "new zealand": "nz", "poland": "pl",
+    "singapore": "sg", "south africa": "za",
+}
+
+
+def fetch_adzuna(sess, keywords: str, limit: int, opts=None) -> List[Job]:
+    """Adzuna aggregator (20 countries, strong local on-site coverage). Needs free API keys."""
+    opts = opts or {}
+    cfg = opts.get("config") or {}
+    app_id = str(cfg.get("adzuna_app_id", "")).strip()
+    app_key = str(cfg.get("adzuna_app_key", "")).strip()
+    cc = _ADZUNA_COUNTRIES.get((opts.get("country") or "").strip().lower())
+    if not (app_id and app_key and cc):
+        return []  # not configured or unsupported country — quietly do nothing
+    try:
+        data = _get_json(sess, f"https://api.adzuna.com/v1/api/jobs/{cc}/search/1", {
+            "app_id": app_id, "app_key": app_key, "what": keywords,
+            "where": opts.get("location") or "", "results_per_page": min(max(limit, 20), 50),
+        })
+        jobs = []
+        for j in data.get("results", []):
+            jobs.append(Job(
+                id=_make_id("adzuna", j.get("redirect_url", ""), j.get("title", ""),
+                            (j.get("company") or {}).get("display_name", "")),
+                source="adzuna",
+                title=(j.get("title") or "").strip(),
+                company=((j.get("company") or {}).get("display_name") or "").strip(),
+                location=((j.get("location") or {}).get("display_name") or "").strip(),
+                remote=None,
+                url=j.get("redirect_url", ""),
+                apply_url=j.get("redirect_url", ""),
+                description=(j.get("description") or "").strip(),
+                tags=[((j.get("category") or {}).get("label") or "")] if j.get("category") else [],
+                salary=_salary_range(j.get("salary_min"), j.get("salary_max")),
+                date=(j.get("created") or "")[:10],
+            ))
+        return jobs
+    except Exception as e:  # noqa: BLE001
+        print(f"  [warn] adzuna source failed: {e}")
+        return []
+
+
+def _company_ats_jobs(sess, name: str) -> List[Job]:
+    """Openings for one company via public ATS APIs (Greenhouse/Lever/Ashby/SmartRecruiters)."""
+    slug = re.sub(r"[^a-z0-9-]", "", name.strip().lower().replace(" ", ""))
+    if not slug:
+        return []
+    timeout = min(get_settings().request_timeout, 10)
+
+    try:  # Greenhouse
+        r = sess.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
+                     params={"content": "true"}, timeout=timeout)
+        if r.status_code == 200 and r.json().get("jobs"):
+            try:  # the board's real name makes a wrong-company match obvious in results
+                board = sess.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}", timeout=timeout)
+                if board.status_code == 200 and board.json().get("name"):
+                    name = board.json()["name"]
+            except Exception:  # noqa: BLE001
+                pass
+            return [Job(
+                id=_make_id("companies", j.get("absolute_url", ""), j.get("title", ""), name),
+                source="companies", title=(j.get("title") or "").strip(), company=name,
+                location=((j.get("location") or {}).get("name") or "").strip(),
+                remote="remote" in ((j.get("location") or {}).get("name") or "").lower() or None,
+                url=j.get("absolute_url", ""), apply_url=j.get("absolute_url", ""),
+                description=util.html_to_text(j.get("content") or ""),
+                tags=["watched company"], salary="", date=(j.get("updated_at") or "")[:10],
+            ) for j in r.json()["jobs"]]
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:  # Lever
+        r = sess.get(f"https://api.lever.co/v0/postings/{slug}", params={"mode": "json"}, timeout=timeout)
+        if r.status_code == 200 and isinstance(r.json(), list) and r.json():
+            return [Job(
+                id=_make_id("companies", j.get("hostedUrl", ""), j.get("text", ""), name),
+                source="companies", title=(j.get("text") or "").strip(), company=name,
+                location=((j.get("categories") or {}).get("location") or "").strip(),
+                remote="remote" in ((j.get("categories") or {}).get("location") or "").lower() or None,
+                url=j.get("hostedUrl", ""), apply_url=j.get("hostedUrl", ""),
+                description=(j.get("descriptionPlain") or "")[:6000],
+                tags=["watched company"], salary="", date="",
+            ) for j in r.json()]
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:  # Ashby
+        r = sess.get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}", timeout=timeout)
+        if r.status_code == 200 and r.json().get("jobs"):
+            return [Job(
+                id=_make_id("companies", j.get("jobUrl", ""), j.get("title", ""), name),
+                source="companies", title=(j.get("title") or "").strip(), company=name,
+                location=(j.get("location") or "").strip(),
+                remote=bool(j.get("isRemote")) or None,
+                url=j.get("jobUrl", ""), apply_url=j.get("applyUrl") or j.get("jobUrl", ""),
+                description=util.html_to_text(j.get("descriptionHtml") or "") or (j.get("descriptionPlain") or ""),
+                tags=["watched company"], salary="", date=(j.get("publishedAt") or "")[:10],
+            ) for j in r.json()["jobs"]]
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:  # SmartRecruiters
+        r = sess.get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings", timeout=timeout)
+        if r.status_code == 200 and r.json().get("content"):
+            return [Job(
+                id=_make_id("companies", str(j.get("id", "")), j.get("name", ""), name),
+                source="companies", title=(j.get("name") or "").strip(),
+                company=((j.get("company") or {}).get("name") or name),
+                location=", ".join(x for x in [((j.get("location") or {}).get("city") or ""),
+                                               ((j.get("location") or {}).get("country") or "").upper()] if x),
+                remote=bool((j.get("location") or {}).get("remote")) or None,
+                url=f"https://jobs.smartrecruiters.com/{slug}/{j.get('id')}",
+                apply_url=f"https://jobs.smartrecruiters.com/{slug}/{j.get('id')}",
+                description="", tags=["watched company"], salary="",
+                date=(j.get("releasedDate") or "")[:10],
+            ) for j in r.json()["content"]]
+    except Exception:  # noqa: BLE001
+        pass
+    return []
+
+
+def fetch_companies(sess, keywords: str, limit: int, opts=None) -> List[Job]:
+    """Careers pages of companies the user watches (set in Settings). Shows ALL their openings
+    that match the keywords — the most targeted source there is."""
+    opts = opts or {}
+    raw = str((opts.get("config") or {}).get("watched_companies", "")).strip()
+    if not raw:
+        return []
+    jobs: List[Job] = []
+    for name in [c.strip() for c in raw.split(",") if c.strip()][:10]:
+        found = _company_ats_jobs(sess, name)
+        if not found:
+            print(f"  [note] no public careers API found for '{name}' "
+                  f"(works for companies on Greenhouse, Lever, Ashby, or SmartRecruiters)")
+        jobs.extend(found)
+    return jobs
+
+
 def _salary_range(lo, hi) -> str:
     try:
         lo = int(lo) if lo else 0
@@ -354,6 +564,10 @@ SOURCES = {
     "himalayas": fetch_himalayas,
     "weworkremotely": fetch_weworkremotely,
     "hn": fetch_hn_hiring,
+    "themuse": fetch_themuse,
+    "companies": fetch_companies,   # careers pages of companies you watch (Settings)
+    "jooble": fetch_jooble,         # ~69 countries incl. Israel; free key (Settings)
+    "adzuna": fetch_adzuna,         # 20 countries, local on-site jobs; free keys (Settings)
 }
 
 
@@ -425,13 +639,20 @@ def search_jobs(
     remote: Optional[bool] = None,
     limit: int = 30,
     sources: Optional[List[str]] = None,
+    country: str = "",
+    config: Optional[dict] = None,
 ) -> List[Job]:
-    """Search all sources, filter to the user's criteria, dedupe, and return up to ``limit`` jobs."""
+    """Search all sources, filter to the user's criteria, dedupe, and return up to ``limit`` jobs.
+
+    ``country`` (from the profile) and ``config`` (free aggregator keys + watched companies)
+    activate the country-aware sources; without them those sources quietly do nothing.
+    """
     if isinstance(keywords, str):
         terms = [k.strip() for k in keywords.split(",") if k.strip()]
     else:
         terms = [str(k).strip() for k in (keywords or []) if str(k).strip()]
     query = " ".join(terms)
+    opts = {"location": location, "country": country, "config": config or {}}
 
     use = sources or list(SOURCES.keys())
     sess = _session()
@@ -441,7 +662,7 @@ def search_jobs(
         if not fn:
             print(f"  [warn] unknown source '{name}' skipped")
             continue
-        for j in fn(sess, query, limit):
+        for j in fn(sess, query, limit, opts):
             j.title = _clean(j.title)
             j.company = _clean(j.company)
             j.location = _clean(j.location)
@@ -453,6 +674,8 @@ def search_jobs(
             if not _matches_location(j, location, remote):
                 continue
             tier = _keyword_tier(j, terms)
+            if tier and j.source == "companies":
+                tier += 1  # openings at companies the user watches outrank generic matches
             if tier:
                 collected.append((tier, j))
 

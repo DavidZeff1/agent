@@ -528,7 +528,7 @@ async function doSearch() {
   updateSelectbar();
   try {
     const body = { keywords, location: $('#loc').value.trim(), remote: $('#remote').checked, limit: 30 };
-    if (HOSTED()) body.profile = P;
+    if (HOSTED()) { body.profile = P; body.sources_config = lsGet('ja_srcfg', {}); }
     const data = await api('search', { body });
     RESULTS = data.results;
     let newCount = data.new;
@@ -994,6 +994,11 @@ function openSettings() {
     ? 'AI is on ✓  (free Groq account, model: ' + STATUS.model + ')'
     : 'AI is currently off — matching still works, documents are just not tailored.';
   $('#automation-block').hidden = HOSTED();  // needs a computer that stays on; not available hosted
+  const src = HOSTED() ? lsGet('ja_srcfg', {}) : (STATUS.settings || {});
+  $('#set-companies').value = src.watched_companies || '';
+  $('#set-jooble').value = src.jooble_key || '';
+  $('#set-adzuna-id').value = src.adzuna_app_id || '';
+  $('#set-adzuna-key').value = src.adzuna_app_key || '';
   $('#key-input').value = '';
   const s = STATUS.settings || {};
   $('#set-autosearch').checked = !!s.autosearch;
@@ -1012,6 +1017,23 @@ async function saveAutomation() {
       auto_prepare_max: parseInt($('#set-maxprep').value, 10),
     } });
     toast('Automation settings saved ✓');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function saveSources() {
+  const cfg = {
+    watched_companies: $('#set-companies').value.trim(),
+    jooble_key: $('#set-jooble').value.trim(),
+    adzuna_app_id: $('#set-adzuna-id').value.trim(),
+    adzuna_app_key: $('#set-adzuna-key').value.trim(),
+  };
+  try {
+    if (HOSTED()) {
+      lsSet('ja_srcfg', cfg);  // hosted: rides along with each search from this browser
+    } else {
+      STATUS.settings = await api('settings', { body: cfg });
+    }
+    toast('Job sources saved ✓ — they\'ll be included in your next search.');
   } catch (e) { toast(e.message, true); }
 }
 
@@ -1124,6 +1146,7 @@ async function init() {
   $('#key-input').addEventListener('keydown', e => { if (e.key === 'Enter') saveKey($('#key-input').value.trim()); });
   $('#btn-remove-key').onclick = () => saveKey('');
   $('#btn-save-settings').onclick = saveAutomation;
+  $('#btn-save-sources').onclick = saveSources;
   $('#btn-run-now').onclick = runCheckNow;
   $('#btn-close-settings').onclick = () => $('#settings').close();
 

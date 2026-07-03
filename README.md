@@ -97,7 +97,7 @@ happy for every visitor to spend your quota — without it, each visitor uses th
 | File | Responsibility |
 |------|----------------|
 | `job_agent/profile_store.py` | Exhaustive profile schema, JSON persistence, interactive intake, arbitrary-question answering |
-| `job_agent/scraper.py` | 7 job sources (Remotive, RemoteOK, Arbeitnow, Jobicy, Himalayas, WeWorkRemotely, HN Who's Hiring), normalization, dedup |
+| `job_agent/scraper.py` | 8 keyless job sources (Remotive, RemoteOK, Arbeitnow, Jobicy, Himalayas, WeWorkRemotely, HN Who's Hiring, The Muse) + 3 configurable ones: a **company watchlist** (careers pages via public Greenhouse/Lever/Ashby/SmartRecruiters APIs) and the **Jooble** (~69 countries incl. Israel) / **Adzuna** (20 countries) aggregators with free keys pasted in Settings |
 | `job_agent/tracker.py` | Remembers every job seen + its status; powers the "only show me new jobs" inbox |
 | `job_agent/pdfgen.py` | HTML→PDF via the locally installed Chrome/Edge (resume.pdf, cover_letter.pdf) |
 | `job_agent/autofill.py` | Fills Greenhouse/Lever application forms in your own browser; never clicks Submit |

@@ -53,6 +53,35 @@ def home() -> Path:
 _load_dotenv([os.path.join(os.getcwd(), ".env"), str(home() / ".env")])
 
 
+# App-level settings (automation knobs + optional job-source keys), stored in
+# JOB_AGENT_HOME/settings.json and editable from the web UI.
+APP_SETTINGS_DEFAULTS = {
+    "autosearch": True,           # check the boards on a schedule while the app runs
+    "autosearch_hours": 6,
+    "auto_prepare_min_score": 0,  # 0 = off
+    "auto_prepare_max": 3,
+    "jooble_key": "",             # free key -> jooble.org (aggregator, ~69 countries)
+    "adzuna_app_id": "",          # free keys -> developer.adzuna.com (20 countries)
+    "adzuna_app_key": "",
+    "watched_companies": "",      # comma list; careers pages checked via public ATS APIs
+}
+
+
+def load_app_settings() -> dict:
+    import json
+
+    out = dict(APP_SETTINGS_DEFAULTS)
+    try:
+        with open(home() / "settings.json", encoding="utf-8") as fh:
+            data = json.load(fh)
+        for k in out:
+            if k in data:
+                out[k] = data[k]
+    except (OSError, ValueError):
+        pass
+    return out
+
+
 class Settings:
     """Resolved runtime settings. Cheap to construct; call :meth:`ensure_home` before writing."""
 

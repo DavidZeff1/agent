@@ -243,8 +243,10 @@ def _split(s: Optional[str]) -> List[str]:
 
 def _search(ctx: Context, keywords, location, remote, limit) -> List[Job]:
     from . import scraper
+    from .config import load_app_settings
 
-    jobs = scraper.search_jobs(keywords, location=location, remote=remote, limit=limit)
+    jobs = scraper.search_jobs(keywords, location=location, remote=remote, limit=limit,
+                               country=ctx.profile.contact.country, config=load_app_settings())
     ctx.save_jobs(jobs)
     return jobs
 

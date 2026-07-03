@@ -35,30 +35,45 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 # App settings (automation knobs) + auto-search scheduler
 # ----------------------------------------------------------------------------
 
-_DEFAULT_APP_SETTINGS = {
-    "autosearch": True,          # check the boards on a schedule while the app runs
-    "autosearch_hours": 6,       # how often
-    "auto_prepare_min_score": 0, # 0 = off; otherwise auto-prepare packets for new jobs >= score
-    "auto_prepare_max": 3,       # cap per run (bounds LLM usage)
-}
-
-
-def load_app_settings() -> dict:
-    data = util.read_json(str(home() / "settings.json"), default={}) or {}
-    out = dict(_DEFAULT_APP_SETTINGS)
-    for k in out:
-        if k in data:
-            out[k] = data[k]
-    return out
+from .config import APP_SETTINGS_DEFAULTS, load_app_settings  # noqa: E402
 
 
 def save_app_settings(new: dict) -> dict:
     cfg = load_app_settings()
-    for k in _DEFAULT_APP_SETTINGS:
+    for k in APP_SETTINGS_DEFAULTS:
         if k in new:
-            cfg[k] = type(_DEFAULT_APP_SETTINGS[k])(new[k])
+            cfg[k] = type(APP_SETTINGS_DEFAULTS[k])(new[k])
     get_settings().ensure_home()
     util.write_json(str(home() / "settings.json"), cfg)
+    return cfg
+
+
+_SOURCE_KEYS = ("jooble_key", "adzuna_app_id", "adzuna_app_key", "watched_companies")
+
+
+def _active_source_count() -> int:
+    """How many sources actually run: the keyless ones plus whatever is configured."""
+    cfg = load_app_settings()
+    n = len(scraper.SOURCES) - 3  # jooble/adzuna/companies only run when configured
+    if cfg["jooble_key"]:
+        n += 1
+    if cfg["adzuna_app_id"] and cfg["adzuna_app_key"]:
+        n += 1
+    if cfg["watched_companies"]:
+        n += 1
+    return n
+
+
+def _source_config(data: dict) -> dict:
+    """Job-source keys for this request: saved settings, overridden by values the browser
+    sends along (hosted mode keeps them in localStorage)."""
+    saved = load_app_settings()
+    cfg = {k: saved[k] for k in _SOURCE_KEYS}
+    body_cfg = data.get("sources_config")
+    if isinstance(body_cfg, dict):
+        for k in _SOURCE_KEYS:
+            if body_cfg.get(k):
+                cfg[k] = str(body_cfg[k])
     return cfg
 
 
@@ -89,7 +104,8 @@ def run_auto_search() -> dict:
         return summary
     try:
         ctx = Context(profile=profile, llm=get_llm(optional=True))
-        jobs = scraper.search_jobs(keywords, remote=profile.preferences.remote_ok, limit=40)
+        jobs = scraper.search_jobs(keywords, remote=profile.preferences.remote_ok, limit=40,
+                                   country=profile.contact.country, config=_source_config({}))
         ctx.save_jobs(jobs)
         ranked = matching.rank_jobs(profile, jobs)
         ctx.save_ranked(ranked)
@@ -226,7 +242,7 @@ def create_app() -> Flask:
             "ai": bool((request.headers.get("X-Groq-Key") or "").strip()) or llm_available(),
             "model": s.model,
             "home": str(s.home),
-            "sources": len(scraper.SOURCES),
+            "sources": _active_source_count(),
             "tracker": tracker.counts(),
             "autorun": util.read_json(_autorun_path(), default={}) or {},
             "settings": load_app_settings(),
@@ -349,6 +365,8 @@ def create_app() -> Flask:
             location=str(data.get("location", "")).strip(),
             remote=bool(data.get("remote", True)),
             limit=limit,
+            country=c.profile.contact.country,
+            config=_source_config(data),
         )
         c.save_jobs(jobs)
         ranked = matching.rank_jobs(c.profile, jobs)
