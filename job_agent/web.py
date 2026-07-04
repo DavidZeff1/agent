@@ -59,21 +59,24 @@ def _active_source_count() -> int:
         n += 1
     if cfg["adzuna_app_id"] and cfg["adzuna_app_key"]:
         n += 1
-    if cfg["watched_companies"]:
+    if cfg.get("auto_companies", True) or cfg["watched_companies"]:
         n += 1
     return n
 
 
 def _source_config(data: dict) -> dict:
-    """Job-source keys for this request: saved settings, overridden by values the browser
+    """Job-source config for this request: saved settings, overridden by values the browser
     sends along (hosted mode keeps them in localStorage)."""
     saved = load_app_settings()
     cfg = {k: saved[k] for k in _SOURCE_KEYS}
+    cfg["auto_companies"] = bool(saved.get("auto_companies", True))
     body_cfg = data.get("sources_config")
     if isinstance(body_cfg, dict):
         for k in _SOURCE_KEYS:
             if body_cfg.get(k):
                 cfg[k] = str(body_cfg[k])
+        if "auto_companies" in body_cfg:
+            cfg["auto_companies"] = bool(body_cfg["auto_companies"])
     return cfg
 
 
@@ -105,7 +108,8 @@ def run_auto_search() -> dict:
     try:
         ctx = Context(profile=profile, llm=get_llm(optional=True))
         jobs = scraper.search_jobs(keywords, remote=profile.preferences.remote_ok, limit=40,
-                                   country=profile.contact.country, config=_source_config({}))
+                                   country=profile.contact.country, config=_source_config({}),
+                                   llm=ctx.llm)
         ctx.save_jobs(jobs)
         ranked = matching.rank_jobs(profile, jobs)
         ctx.save_ranked(ranked)
@@ -367,6 +371,7 @@ def create_app() -> Flask:
             limit=limit,
             country=c.profile.contact.country,
             config=_source_config(data),
+            llm=_req_llm(),
         )
         c.save_jobs(jobs)
         ranked = matching.rank_jobs(c.profile, jobs)

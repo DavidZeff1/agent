@@ -246,7 +246,8 @@ def _search(ctx: Context, keywords, location, remote, limit) -> List[Job]:
     from .config import load_app_settings
 
     jobs = scraper.search_jobs(keywords, location=location, remote=remote, limit=limit,
-                               country=ctx.profile.contact.country, config=load_app_settings())
+                               country=ctx.profile.contact.country, config=load_app_settings(),
+                               llm=ctx.llm)
     ctx.save_jobs(jobs)
     return jobs
 

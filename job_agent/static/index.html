@@ -321,12 +321,14 @@
 
   <hr class="sep">
   <h2>More job sources</h2>
-  <label>Companies you'd love to work for
-    <input id="set-companies" placeholder="type their websites, e.g. monday.com, gong.io, lemonade.com">
+  <label class="check"><input type="checkbox" id="set-auto-companies" checked>
+    Automatically check company career pages in my country</label>
+  <p class="tiny muted">Based on the country in your profile, we check the careers pages of
+  well-known companies there directly (with AI on, we can find companies for any country).
+  Nothing to set up.</p>
+  <label>Extra companies to always check <span class="opt">optional</span>
+    <input id="set-companies" placeholder="type their websites, e.g. gong.io, lemonade.com">
   </label>
-  <p class="tiny muted">We check their careers pages directly — works when they hire through
-  Greenhouse, Lever, Ashby, or SmartRecruiters (most tech companies do). Typing the company's
-  website name gives the best match.</p>
   <label>Jooble API key <span class="opt">optional</span>
     <input id="set-jooble" placeholder="free key at jooble.org/api/about — adds jobs in ~69 countries, incl. Israel">
   </label>

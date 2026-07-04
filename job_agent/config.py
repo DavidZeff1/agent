@@ -63,7 +63,8 @@ APP_SETTINGS_DEFAULTS = {
     "jooble_key": "",             # free key -> jooble.org (aggregator, ~69 countries)
     "adzuna_app_id": "",          # free keys -> developer.adzuna.com (20 countries)
     "adzuna_app_key": "",
-    "watched_companies": "",      # comma list; careers pages checked via public ATS APIs
+    "auto_companies": True,       # automatically check company careers pages for the user's country
+    "watched_companies": "",      # optional extras; careers pages checked via public ATS APIs
 }
 
 

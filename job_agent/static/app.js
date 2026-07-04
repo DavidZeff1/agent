@@ -995,6 +995,7 @@ function openSettings() {
     : 'AI is currently off — matching still works, documents are just not tailored.';
   $('#automation-block').hidden = HOSTED();  // needs a computer that stays on; not available hosted
   const src = HOSTED() ? lsGet('ja_srcfg', {}) : (STATUS.settings || {});
+  $('#set-auto-companies').checked = src.auto_companies !== false;
   $('#set-companies').value = src.watched_companies || '';
   $('#set-jooble').value = src.jooble_key || '';
   $('#set-adzuna-id').value = src.adzuna_app_id || '';
@@ -1022,6 +1023,7 @@ async function saveAutomation() {
 
 async function saveSources() {
   const cfg = {
+    auto_companies: $('#set-auto-companies').checked,
     watched_companies: $('#set-companies').value.trim(),
     jooble_key: $('#set-jooble').value.trim(),
     adzuna_app_id: $('#set-adzuna-id').value.trim(),

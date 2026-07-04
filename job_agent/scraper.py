@@ -447,100 +447,216 @@ def fetch_adzuna(sess, keywords: str, limit: int, opts=None) -> List[Job]:
         return []
 
 
-def _company_ats_jobs(sess, name: str) -> List[Job]:
-    """Openings for one company via public ATS APIs (Greenhouse/Lever/Ashby/SmartRecruiters)."""
-    slug = re.sub(r"[^a-z0-9-]", "", name.strip().lower().replace(" ", ""))
-    if not slug:
+def _gh_board(sess, slug: str, name: str, timeout: float) -> List[Job]:
+    r = sess.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
+                 params={"content": "true"}, timeout=timeout)
+    if r.status_code != 200 or not r.json().get("jobs"):
         return []
-    timeout = min(get_settings().request_timeout, 10)
+    return [Job(
+        id=_make_id("companies", j.get("absolute_url", ""), j.get("title", ""), name),
+        source="companies", title=(j.get("title") or "").strip(), company=name,
+        location=((j.get("location") or {}).get("name") or "").strip(),
+        remote="remote" in ((j.get("location") or {}).get("name") or "").lower() or None,
+        url=j.get("absolute_url", ""), apply_url=j.get("absolute_url", ""),
+        description=util.truncate(util.html_to_text(j.get("content") or ""), 6000),
+        tags=["company careers page"], salary="", date=(j.get("updated_at") or "")[:10],
+    ) for j in r.json()["jobs"]]
 
-    try:  # Greenhouse
-        r = sess.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
-                     params={"content": "true"}, timeout=timeout)
-        if r.status_code == 200 and r.json().get("jobs"):
-            try:  # the board's real name makes a wrong-company match obvious in results
-                board = sess.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}", timeout=timeout)
-                if board.status_code == 200 and board.json().get("name"):
-                    name = board.json()["name"]
+
+def _lever_board(sess, slug: str, name: str, timeout: float) -> List[Job]:
+    r = sess.get(f"https://api.lever.co/v0/postings/{slug}", params={"mode": "json"}, timeout=timeout)
+    if r.status_code != 200 or not isinstance(r.json(), list) or not r.json():
+        return []
+    return [Job(
+        id=_make_id("companies", j.get("hostedUrl", ""), j.get("text", ""), name),
+        source="companies", title=(j.get("text") or "").strip(), company=name,
+        location=((j.get("categories") or {}).get("location") or "").strip(),
+        remote="remote" in ((j.get("categories") or {}).get("location") or "").lower() or None,
+        url=j.get("hostedUrl", ""), apply_url=j.get("hostedUrl", ""),
+        description=(j.get("descriptionPlain") or "")[:6000],
+        tags=["company careers page"], salary="", date="",
+    ) for j in r.json()]
+
+
+def _ashby_board(sess, slug: str, name: str, timeout: float) -> List[Job]:
+    r = sess.get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}", timeout=timeout)
+    if r.status_code != 200 or not r.json().get("jobs"):
+        return []
+    return [Job(
+        id=_make_id("companies", j.get("jobUrl", ""), j.get("title", ""), name),
+        source="companies", title=(j.get("title") or "").strip(), company=name,
+        location=(j.get("location") or "").strip(),
+        remote=bool(j.get("isRemote")) or None,
+        url=j.get("jobUrl", ""), apply_url=j.get("applyUrl") or j.get("jobUrl", ""),
+        description=util.truncate(util.html_to_text(j.get("descriptionHtml") or "")
+                                  or (j.get("descriptionPlain") or ""), 6000),
+        tags=["company careers page"], salary="", date=(j.get("publishedAt") or "")[:10],
+    ) for j in r.json()["jobs"]]
+
+
+def _sr_board(sess, slug: str, name: str, timeout: float) -> List[Job]:
+    r = sess.get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings", timeout=timeout)
+    if r.status_code != 200 or not r.json().get("content"):
+        return []
+    return [Job(
+        id=_make_id("companies", str(j.get("id", "")), j.get("name", ""), name),
+        source="companies", title=(j.get("name") or "").strip(),
+        company=((j.get("company") or {}).get("name") or name),
+        location=", ".join(x for x in [((j.get("location") or {}).get("city") or ""),
+                                       ((j.get("location") or {}).get("country") or "").upper()] if x),
+        remote=bool((j.get("location") or {}).get("remote")) or None,
+        url=f"https://jobs.smartrecruiters.com/{slug}/{j.get('id')}",
+        apply_url=f"https://jobs.smartrecruiters.com/{slug}/{j.get('id')}",
+        description="", tags=["company careers page"], salary="",
+        date=(j.get("releasedDate") or "")[:10],
+    ) for j in r.json()["content"]]
+
+
+_ATS_FETCHERS = {"greenhouse": _gh_board, "lever": _lever_board,
+                 "ashby": _ashby_board, "smartrecruiters": _sr_board}
+
+
+def _fetch_board(sess, slug: str, ats: str, name: str) -> List[Job]:
+    """Fetch one company's openings from its known ATS. Errors just mean no jobs today."""
+    fn = _ATS_FETCHERS.get(ats)
+    if not fn:
+        return []
+    try:
+        return fn(sess, slug, name, min(get_settings().request_timeout, 12))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def probe_company(sess, raw_name: str):
+    """Find which ATS (if any) hosts a company's board. Returns (slug, ats, name) or None."""
+    from . import company_directory as cd
+
+    cached = cd.cached_manual(raw_name)
+    if cached is not None:
+        return cached[0]
+    base = raw_name.strip().lower()
+    base = re.sub(r"^(https?://)?(www\.)?", "", base).split("/")[0]  # allow pasted URLs
+    stem = base.split(".")[0]
+    candidates = []
+    for cand in (re.sub(r"[^a-z0-9-]", "", base.replace(".", "")),  # gong.io -> gongio
+                 re.sub(r"[^a-z0-9-]", "", stem),                    # gong.io -> gong
+                 re.sub(r"[^a-z0-9-]", "", base.replace(" ", "-"))):
+        if cand and cand not in candidates:
+            candidates.append(cand)
+    timeout = min(get_settings().request_timeout, 8)
+    for slug in candidates:
+        for ats, fn in _ATS_FETCHERS.items():
+            try:
+                if fn(sess, slug, raw_name.strip(), timeout):
+                    entry = (slug, ats, raw_name.strip())
+                    cd.save_manual(raw_name, entry)
+                    return entry
             except Exception:  # noqa: BLE001
-                pass
-            return [Job(
-                id=_make_id("companies", j.get("absolute_url", ""), j.get("title", ""), name),
-                source="companies", title=(j.get("title") or "").strip(), company=name,
-                location=((j.get("location") or {}).get("name") or "").strip(),
-                remote="remote" in ((j.get("location") or {}).get("name") or "").lower() or None,
-                url=j.get("absolute_url", ""), apply_url=j.get("absolute_url", ""),
-                description=util.html_to_text(j.get("content") or ""),
-                tags=["watched company"], salary="", date=(j.get("updated_at") or "")[:10],
-            ) for j in r.json()["jobs"]]
-    except Exception:  # noqa: BLE001
-        pass
+                continue
+    cd.save_manual(raw_name, None)
+    return None
 
-    try:  # Lever
-        r = sess.get(f"https://api.lever.co/v0/postings/{slug}", params={"mode": "json"}, timeout=timeout)
-        if r.status_code == 200 and isinstance(r.json(), list) and r.json():
-            return [Job(
-                id=_make_id("companies", j.get("hostedUrl", ""), j.get("text", ""), name),
-                source="companies", title=(j.get("text") or "").strip(), company=name,
-                location=((j.get("categories") or {}).get("location") or "").strip(),
-                remote="remote" in ((j.get("categories") or {}).get("location") or "").lower() or None,
-                url=j.get("hostedUrl", ""), apply_url=j.get("hostedUrl", ""),
-                description=(j.get("descriptionPlain") or "")[:6000],
-                tags=["watched company"], salary="", date="",
-            ) for j in r.json()]
-    except Exception:  # noqa: BLE001
-        pass
 
-    try:  # Ashby
-        r = sess.get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}", timeout=timeout)
-        if r.status_code == 200 and r.json().get("jobs"):
-            return [Job(
-                id=_make_id("companies", j.get("jobUrl", ""), j.get("title", ""), name),
-                source="companies", title=(j.get("title") or "").strip(), company=name,
-                location=(j.get("location") or "").strip(),
-                remote=bool(j.get("isRemote")) or None,
-                url=j.get("jobUrl", ""), apply_url=j.get("applyUrl") or j.get("jobUrl", ""),
-                description=util.html_to_text(j.get("descriptionHtml") or "") or (j.get("descriptionPlain") or ""),
-                tags=["watched company"], salary="", date=(j.get("publishedAt") or "")[:10],
-            ) for j in r.json()["jobs"]]
-    except Exception:  # noqa: BLE001
-        pass
+def _discover_companies(sess, country: str, llm) -> list:
+    """LLM suggests companies for a country; we verify each against the real ATS APIs."""
+    from concurrent.futures import ThreadPoolExecutor
 
-    try:  # SmartRecruiters
-        r = sess.get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings", timeout=timeout)
-        if r.status_code == 200 and r.json().get("content"):
-            return [Job(
-                id=_make_id("companies", str(j.get("id", "")), j.get("name", ""), name),
-                source="companies", title=(j.get("name") or "").strip(),
-                company=((j.get("company") or {}).get("name") or name),
-                location=", ".join(x for x in [((j.get("location") or {}).get("city") or ""),
-                                               ((j.get("location") or {}).get("country") or "").upper()] if x),
-                remote=bool((j.get("location") or {}).get("remote")) or None,
-                url=f"https://jobs.smartrecruiters.com/{slug}/{j.get('id')}",
-                apply_url=f"https://jobs.smartrecruiters.com/{slug}/{j.get('id')}",
-                description="", tags=["watched company"], salary="",
-                date=(j.get("releasedDate") or "")[:10],
-            ) for j in r.json()["content"]]
-    except Exception:  # noqa: BLE001
-        pass
-    return []
+    from . import company_directory as cd
+
+    candidates = cd.discover_candidates(country, llm)
+    if not candidates:
+        return []
+    timeout = min(get_settings().request_timeout, 8)
+
+    def verify(c) -> object:
+        for slug in (c.get("slugs") or [])[:3]:
+            slug = re.sub(r"[^a-z0-9-]", "", slug)
+            if not slug:
+                continue
+            for ats, fn in _ATS_FETCHERS.items():
+                try:
+                    if fn(sess, slug, c["name"], timeout):
+                        return (slug, ats, c["name"])
+                except Exception:  # noqa: BLE001
+                    continue
+        return None
+
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        entries = [e for e in ex.map(verify, candidates) if e]
+    cd.save_discovered(country, entries)
+    print(f"  [info] discovered {len(entries)} companies with public careers boards in {country}")
+    return entries
 
 
 def fetch_companies(sess, keywords: str, limit: int, opts=None) -> List[Job]:
-    """Careers pages of companies the user watches (set in Settings). Shows ALL their openings
-    that match the keywords — the most targeted source there is."""
+    """Openings straight from company careers pages — automatic for the user's country.
+
+    The company list comes from the shipped directory (verified boards per country), an
+    AI-discovered + verified cache for other countries, and any companies the user added
+    in Settings. All boards are fetched in parallel; keyword filtering happens in the
+    aggregator like every other source.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from . import company_directory as cd
+
     opts = opts or {}
-    raw = str((opts.get("config") or {}).get("watched_companies", "")).strip()
-    if not raw:
+    cfg = opts.get("config") or {}
+    country = str(opts.get("country") or "").strip()
+    auto = bool(cfg.get("auto_companies", True))
+
+    entries: list = []
+    if auto and country:
+        entries = cd.builtin_for(country)
+        if not entries:
+            entries = cd.cached_discovered(country) or []
+            if not entries and opts.get("llm") is not None:
+                entries = _discover_companies(sess, country, opts["llm"])
+
+    for raw in [c.strip() for c in str(cfg.get("watched_companies", "")).split(",") if c.strip()][:10]:
+        entry = probe_company(sess, raw)
+        if entry:
+            entries.append(entry)
+        else:
+            print(f"  [note] no public careers API found for '{raw}' "
+                  f"(works for companies on Greenhouse, Lever, Ashby, or SmartRecruiters)")
+
+    seen: set = set()
+    unique = [e for e in entries if not (e[0] in seen or seen.add(e[0]))][:30]
+    if not unique:
         return []
     jobs: List[Job] = []
-    for name in [c.strip() for c in raw.split(",") if c.strip()][:10]:
-        found = _company_ats_jobs(sess, name)
-        if not found:
-            print(f"  [note] no public careers API found for '{name}' "
-                  f"(works for companies on Greenhouse, Lever, Ashby, or SmartRecruiters)")
-        jobs.extend(found)
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for batch in ex.map(lambda e: _fetch_board(sess, *e), unique):
+            jobs.extend(batch[:120])  # one enormous employer shouldn't drown the rest
     return jobs
+
+
+def fetch_workingnomads(sess, keywords: str, limit: int, opts=None) -> List[Job]:
+    """Working Nomads public feed (keyless, remote roles)."""
+    try:
+        data = _get_json(sess, "https://www.workingnomads.com/api/exposed_jobs/")
+        jobs = []
+        for j in data if isinstance(data, list) else []:
+            jobs.append(Job(
+                id=_make_id("workingnomads", j.get("url", ""), j.get("title", ""), j.get("company_name", "")),
+                source="workingnomads",
+                title=(j.get("title") or "").strip(),
+                company=(j.get("company_name") or "").strip(),
+                location=(j.get("location") or "Remote").strip() or "Remote",
+                remote=True,
+                url=j.get("url", ""),
+                apply_url=j.get("url", ""),
+                description=util.html_to_text(j.get("description") or ""),
+                tags=[t.strip() for t in str(j.get("tags") or "").split(",") if t.strip()]
+                     + [t for t in [j.get("category_name")] if t],
+                salary="",
+                date=(j.get("pub_date") or "")[:10],
+            ))
+        return jobs
+    except Exception as e:  # noqa: BLE001
+        print(f"  [warn] workingnomads source failed: {e}")
+        return []
 
 
 def _salary_range(lo, hi) -> str:
@@ -565,7 +681,8 @@ SOURCES = {
     "weworkremotely": fetch_weworkremotely,
     "hn": fetch_hn_hiring,
     "themuse": fetch_themuse,
-    "companies": fetch_companies,   # careers pages of companies you watch (Settings)
+    "workingnomads": fetch_workingnomads,
+    "companies": fetch_companies,   # company careers pages — automatic for the user's country
     "jooble": fetch_jooble,         # ~69 countries incl. Israel; free key (Settings)
     "adzuna": fetch_adzuna,         # 20 countries, local on-site jobs; free keys (Settings)
 }
@@ -641,18 +758,20 @@ def search_jobs(
     sources: Optional[List[str]] = None,
     country: str = "",
     config: Optional[dict] = None,
+    llm=None,
 ) -> List[Job]:
     """Search all sources, filter to the user's criteria, dedupe, and return up to ``limit`` jobs.
 
-    ``country`` (from the profile) and ``config`` (free aggregator keys + watched companies)
-    activate the country-aware sources; without them those sources quietly do nothing.
+    ``country`` (from the profile) drives the automatic company-careers source; ``config``
+    carries optional aggregator keys and manual extras; ``llm`` (optional) lets the company
+    source discover employers for countries not in the shipped directory.
     """
     if isinstance(keywords, str):
         terms = [k.strip() for k in keywords.split(",") if k.strip()]
     else:
         terms = [str(k).strip() for k in (keywords or []) if str(k).strip()]
     query = " ".join(terms)
-    opts = {"location": location, "country": country, "config": config or {}}
+    opts = {"location": location, "country": country, "config": config or {}, "llm": llm}
 
     use = sources or list(SOURCES.keys())
     sess = _session()
@@ -682,4 +801,35 @@ def search_jobs(
     # Strong (title/tag) matches first, so weak matches never crowd them out of `limit`.
     collected.sort(key=lambda x: x[0], reverse=True)
     deduped = _dedupe([j for _, j in collected])
-    return deduped[:limit]
+
+    # Company careers pages can return hundreds of matches; keep them to at most half the
+    # results so board variety survives (they may fill more only when boards found little),
+    # and round-robin across companies so one big employer can't hog that half.
+    board_count = sum(1 for j in deduped if j.source != "companies")
+    company_cap = max(limit // 2, limit - board_count)
+    by_company: dict[str, List[Job]] = {}
+    for j in deduped:
+        if j.source == "companies":
+            by_company.setdefault(j.company, []).append(j)
+    picked: List[Job] = []
+    while len(picked) < company_cap and by_company:
+        for name in list(by_company):
+            queue = by_company[name]
+            picked.append(queue.pop(0))
+            if not queue:
+                del by_company[name]
+            if len(picked) >= company_cap:
+                break
+    # Re-walk the ranked list, filling each company slot with the next diversified pick.
+    out: List[Job] = []
+    n_used = 0
+    for j in deduped:
+        if j.source == "companies":
+            if n_used >= len(picked):
+                continue
+            j = picked[n_used]
+            n_used += 1
+        out.append(j)
+        if len(out) >= limit:
+            break
+    return out

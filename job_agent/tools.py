@@ -130,7 +130,8 @@ def build_registry(ctx: Context) -> ToolRegistry:
         from .config import load_app_settings
 
         jobs = scraper.search_jobs(keywords, location=location, remote=remote, limit=limit, sources=sources,
-                                   country=ctx.profile.contact.country, config=load_app_settings())
+                                   country=ctx.profile.contact.country, config=load_app_settings(),
+                                   llm=ctx.llm)
         ctx.save_jobs(jobs)
         return {
             "found": len(jobs),
