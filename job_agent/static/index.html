@@ -23,6 +23,16 @@
 
 <main id="main">
 
+  <!-- ============================== STARTUP ERROR ============================== -->
+  <section id="view-error" class="view" hidden>
+    <div class="card empty">
+      <span class="big">😕</span>
+      <h2 style="margin-bottom:6px">Job Agent couldn't start</h2>
+      <p class="muted" id="error-detail" style="max-width:520px;margin:0 auto 18px"></p>
+      <button class="btn primary big" onclick="location.reload()">Try again</button>
+    </div>
+  </section>
+
   <!-- ============================== WELCOME ============================== -->
   <section id="view-welcome" class="view" hidden>
     <div class="hero card">

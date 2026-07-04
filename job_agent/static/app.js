@@ -1093,13 +1093,50 @@ async function saveKey(key) {
 
 /* ---------------- init ---------------- */
 
+async function apiRetry(path, tries) {
+  // The launcher opens this tab a moment after starting the server — retry a few
+  // times so a slightly slow start never leaves the user staring at a blank page.
+  for (let i = 0; ; i++) {
+    try { return await api(path); }
+    catch (e) {
+      if (i >= tries - 1) throw e;
+      await new Promise(r => setTimeout(r, 700 * (i + 1)));
+    }
+  }
+}
+
+function showFatal(e) {
+  $$('.view').forEach(v => { v.hidden = true; });
+  $('#error-detail').textContent =
+    (e && e.message ? e.message + ' — ' : '') +
+    'If this keeps happening, close this tab, start Job Agent again, and reopen it.';
+  $('#view-error').hidden = false;
+}
+
+function normalizeProfile(p) {
+  // Profiles saved by older versions (or hand-edited) may miss whole sections.
+  p.contact = p.contact || {};
+  p.links = p.links || {};
+  p.preferences = p.preferences || {};
+  p.demographics = p.demographics || {};
+  p.additional = p.additional || {};
+  for (const k of ['skills', 'nationalities', 'experience', 'education', 'projects',
+                   'languages', 'certifications', 'work_authorizations']) {
+    if (!Array.isArray(p[k])) p[k] = [];
+  }
+  return p;
+}
+
 async function init() {
   try {
-    STATUS = await api('status');
+    await initInner();
   } catch (e) {
-    toast('Cannot reach Job Agent. Close this tab and start the app again.', true);
-    return;
+    showFatal(e);
   }
+}
+
+async function initInner() {
+  STATUS = await apiRetry('status', 4);
   renderHeader();
   $$('.nboards').forEach(n => { n.textContent = STATUS.sources || 7; });
   buildDatalists();
@@ -1112,6 +1149,7 @@ async function init() {
   } else {
     P = await api('profile');
   }
+  normalizeProfile(P);
   ADD = Object.entries(P.additional || {});
   bindInputs();
   EDITORS.forEach(renderEditor);
@@ -1176,7 +1214,17 @@ async function init() {
         }
       } catch (e) { /* no saved results yet */ }
     }
+    if (!RESULTS.length) renderReadyHint();
   }
+}
+
+function renderReadyHint() {
+  // First visit with a profile but nothing searched yet — say so instead of blank space.
+  const empty = el('div', 'card empty');
+  empty.append(el('span', 'big', '👋'),
+    el('div', null, `Welcome back${P.preferred_name || P.full_name ? ', ' + (P.preferred_name || P.full_name.split(' ')[0]) : ''}! ` +
+      `Click “Find jobs” above and we'll search ${STATUS.sources || 10} job boards for you.`));
+  $('#results').appendChild(empty);
 }
 
 init();
