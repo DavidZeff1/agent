@@ -545,8 +545,59 @@ def create_app() -> Flask:
     return app
 
 
+def _port_free(port: int) -> bool:
+    import socket
+
+    with socket.socket() as s:
+        # match the server's own bind semantics, so a just-closed port (TIME_WAIT)
+        # doesn't read as occupied
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _replace_stale_job_agent(port: int) -> bool:
+    """If an OLD Job Agent from a previous launch holds the port, stop it so the user
+    gets the current code instead of silently talking to last week's version."""
+    import json as _json
+    import subprocess
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=2) as resp:
+            data = _json.loads(resp.read().decode())
+        if not ("home" in data and "tracker" in data):
+            return False  # something else lives here (e.g. a random http.server) — leave it be
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        pids = subprocess.run(["lsof", "-ti", f"tcp:{port}"], capture_output=True, text=True).stdout.split()
+        for pid in pids:
+            subprocess.run(["kill", pid], capture_output=True)
+        time.sleep(1.0)
+        print(f"(stopped a Job Agent left over from a previous launch on port {port})")
+        return _port_free(port)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _pick_port(preferred: int) -> int:
+    """The preferred port, a reclaimed one, or the next free one — never a squatted one."""
+    if _port_free(preferred) or _replace_stale_job_agent(preferred):
+        return preferred
+    for cand in range(preferred + 1, preferred + 11):
+        if _port_free(cand):
+            print(f"Port {preferred} is taken by another program — using {cand} instead.")
+            return cand
+    return preferred  # let app.run surface the error
+
+
 def serve(port: int = 8765, open_browser: bool = False, debug: bool = False) -> int:
     app = create_app()
+    port = _pick_port(port)
     url = f"http://127.0.0.1:{port}"
     threading.Thread(target=_scheduler_loop, daemon=True, name="ja-autosearch").start()
     if open_browser:
@@ -556,8 +607,6 @@ def serve(port: int = 8765, open_browser: bool = False, debug: bool = False) -> 
     try:
         app.run(host="127.0.0.1", port=port, threaded=True, debug=debug, use_reloader=False)
     except OSError:
-        print(f"Port {port} is already in use — Job Agent may already be running at {url}")
-        if open_browser:
-            webbrowser.open(url)
+        print(f"Could not start on port {port}. Close other programs using it and try again.")
         return 1
     return 0
