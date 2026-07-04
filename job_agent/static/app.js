@@ -989,23 +989,30 @@ async function doAnswer() {
 
 /* ---------------- settings ---------------- */
 
+function setVal(sel, v) { const e = $(sel); if (e) e.value = v; }
+function setChecked(sel, v) { const e = $(sel); if (e) e.checked = v; }
+
 function openSettings() {
-  $('#settings-status').textContent = STATUS.ai
+  // Every field is set tolerantly: if the browser cached an older page that lacks a
+  // newer field, Settings must still open rather than die half-way.
+  const st = $('#settings-status');
+  if (st) st.textContent = STATUS.ai
     ? 'AI is on ✓  (free Groq account, model: ' + STATUS.model + ')'
     : 'AI is currently off — matching still works, documents are just not tailored.';
-  $('#automation-block').hidden = HOSTED();  // needs a computer that stays on; not available hosted
+  const auto = $('#automation-block');
+  if (auto) auto.hidden = HOSTED();  // needs a computer that stays on; not available hosted
   const src = HOSTED() ? lsGet('ja_srcfg', {}) : (STATUS.settings || {});
-  $('#set-auto-companies').checked = src.auto_companies !== false;
-  $('#set-companies').value = src.watched_companies || '';
-  $('#set-jooble').value = src.jooble_key || '';
-  $('#set-adzuna-id').value = src.adzuna_app_id || '';
-  $('#set-adzuna-key').value = src.adzuna_app_key || '';
-  $('#key-input').value = '';
+  setChecked('#set-auto-companies', src.auto_companies !== false);
+  setVal('#set-companies', src.watched_companies || '');
+  setVal('#set-jooble', src.jooble_key || '');
+  setVal('#set-adzuna-id', src.adzuna_app_id || '');
+  setVal('#set-adzuna-key', src.adzuna_app_key || '');
+  setVal('#key-input', '');
   const s = STATUS.settings || {};
-  $('#set-autosearch').checked = !!s.autosearch;
-  $('#set-hours').value = String(s.autosearch_hours || 6);
-  $('#set-minscore').value = String(s.auto_prepare_min_score || 0);
-  $('#set-maxprep').value = String(s.auto_prepare_max || 3);
+  setChecked('#set-autosearch', !!s.autosearch);
+  setVal('#set-hours', String(s.autosearch_hours || 6));
+  setVal('#set-minscore', String(s.auto_prepare_min_score || 0));
+  setVal('#set-maxprep', String(s.auto_prepare_max || 3));
   $('#settings').showModal();
 }
 
