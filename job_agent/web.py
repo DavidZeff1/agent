@@ -229,6 +229,15 @@ def create_app() -> Flask:
     app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
     app.json.sort_keys = False  # keep form fields in their natural order (name first, not alphabetical)
 
+    @app.after_request
+    def _always_revalidate(resp):
+        # The app shell must never be served stale: a cached old index.html paired with a
+        # newer app.js (e.g. behind Vercel's CDN) crashes startup into a blank page.
+        # no-cache still allows conditional requests, so ETag 304s keep this fast.
+        if resp.mimetype in ("text/html", "application/javascript", "text/javascript", "text/css"):
+            resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
+
     @app.get("/")
     def index():
         return send_from_directory(STATIC_DIR, "index.html")

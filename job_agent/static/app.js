@@ -1105,12 +1105,34 @@ async function apiRetry(path, tries) {
   }
 }
 
+function wire(sel, evt, fn) {
+  // Tolerant event wiring: if the page HTML is an older cached version missing this
+  // element, log and keep going instead of killing startup for everyone.
+  const elx = $(sel);
+  if (elx) elx.addEventListener(evt, fn);
+  else console.warn('Element missing (stale cached page?):', sel);
+  return elx;
+}
+
 function showFatal(e) {
   $$('.view').forEach(v => { v.hidden = true; });
+  let view = $('#view-error');
+  if (!view) {  // even the error screen may be missing from a stale cached page — build it
+    view = document.createElement('section');
+    view.id = 'view-error';
+    view.className = 'view';
+    const card = el('div', 'card empty');
+    card.append(el('span', 'big', '😕'), el('h2', null, "Job Agent couldn't start"),
+                el('p', 'muted'), el('button', 'btn primary big', 'Try again'));
+    card.lastChild.onclick = () => location.reload(true);
+    card.children[2].id = 'error-detail';
+    view.appendChild(card);
+    ($('#main') || document.body).appendChild(view);
+  }
   $('#error-detail').textContent =
     (e && e.message ? e.message + ' — ' : '') +
-    'If this keeps happening, close this tab, start Job Agent again, and reopen it.';
-  $('#view-error').hidden = false;
+    'Refresh the page (Cmd/Ctrl+Shift+R). If this keeps happening, restart Job Agent.';
+  view.hidden = false;
 }
 
 function normalizeProfile(p) {
@@ -1158,37 +1180,37 @@ async function initInner() {
 
   // navigation
   $$('.navbtn').forEach(b => { b.onclick = () => switchView(b.dataset.view); });
-  $('#welcome-start').onclick = () => switchView('profile');
-  $('#btn-back').onclick = () => switchView('apps');
-  $('#ai-chip').onclick = openSettings;
+  wire('#welcome-start', 'click', () => switchView('profile'));
+  wire('#btn-back', 'click', () => switchView('apps'));
+  wire('#ai-chip', 'click', openSettings);
 
   // profile
-  $('#save-profile').onclick = saveProfile;
-  $('#btn-gh-import').onclick = doGithubImport;
-  if (P.links.github) $('#gh-user').value = P.links.github.replace(/^https?:\/\//, '');
+  wire('#save-profile', 'click', saveProfile);
+  wire('#btn-gh-import', 'click', doGithubImport);
+  if (P.links.github && $('#gh-user')) $('#gh-user').value = P.links.github.replace(/^https?:\/\//, '');
 
   // find jobs
-  $('#btn-search').onclick = doSearch;
-  $('#kw').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-  $('#btn-rerank').onclick = doRerank;
-  $('#btn-prepare').onclick = doPrepare;
-  $('#filter').onchange = () => { FILTER = $('#filter').value; renderResults(); };
+  wire('#btn-search', 'click', doSearch);
+  wire('#kw', 'keydown', e => { if (e.key === 'Enter') doSearch(); });
+  wire('#btn-rerank', 'click', doRerank);
+  wire('#btn-prepare', 'click', doPrepare);
+  wire('#filter', 'change', () => { FILTER = $('#filter').value; renderResults(); });
 
   // application detail
-  $('#btn-autofill').onclick = doAutofill;
-  $('#btn-answer').onclick = doAnswer;
-  $('#qa-question').addEventListener('keydown', e => { if (e.key === 'Enter') doAnswer(); });
-  $('#dl-cover').onclick = () => download('Cover letter - ' + (CURRENT_APP.job.company || 'job') + '.txt', CURRENT_APP.cover_letter);
-  $('#dl-resume').onclick = () => download('Resume - ' + (P.full_name || 'me') + '.txt', CURRENT_APP.resume_txt);
+  wire('#btn-autofill', 'click', doAutofill);
+  wire('#btn-answer', 'click', doAnswer);
+  wire('#qa-question', 'keydown', e => { if (e.key === 'Enter') doAnswer(); });
+  wire('#dl-cover', 'click', () => download('Cover letter - ' + (CURRENT_APP.job.company || 'job') + '.txt', CURRENT_APP.cover_letter));
+  wire('#dl-resume', 'click', () => download('Resume - ' + (P.full_name || 'me') + '.txt', CURRENT_APP.resume_txt));
 
   // settings
-  $('#btn-save-key').onclick = () => saveKey($('#key-input').value.trim());
-  $('#key-input').addEventListener('keydown', e => { if (e.key === 'Enter') saveKey($('#key-input').value.trim()); });
-  $('#btn-remove-key').onclick = () => saveKey('');
-  $('#btn-save-settings').onclick = saveAutomation;
-  $('#btn-save-sources').onclick = saveSources;
-  $('#btn-run-now').onclick = runCheckNow;
-  $('#btn-close-settings').onclick = () => $('#settings').close();
+  wire('#btn-save-key', 'click', () => saveKey($('#key-input').value.trim()));
+  wire('#key-input', 'keydown', e => { if (e.key === 'Enter') saveKey($('#key-input').value.trim()); });
+  wire('#btn-remove-key', 'click', () => saveKey(''));
+  wire('#btn-save-settings', 'click', saveAutomation);
+  wire('#btn-save-sources', 'click', saveSources);
+  wire('#btn-run-now', 'click', runCheckNow);
+  wire('#btn-close-settings', 'click', () => $('#settings').close());
 
   // generic copy buttons (copy the text of the element in data-copy)
   document.addEventListener('click', e => {
