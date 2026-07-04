@@ -269,41 +269,50 @@ add_shot(s, f"{S}/pres-detail.jpg", Inches(1.0), 5.4)
 caption(s, [("Tailored resume (PDF), cover letter, and every form answer with a ", False), ("Copy", True),
             (" button — fact-checked before you see it.", False)], Inches(6.65))
 
-# ============================== 7 · ARCHITECTURE ==============================
-s = slide("Three ways in, one engine. The tool registry is the key design move: every capability is defined once and callable by code or by the LLM.")
-eyebrow(s, "04 · Architecture")
-title(s, [("Three interfaces, ", False), ("one engine", True)], size=36, y=Inches(0.82))
-rowy = Inches(1.75)
-rh = Inches(0.92)
-flow_x0, flow_x1 = Inches(0.75), Inches(12.58)
-w3 = Emu(int((flow_x1 - flow_x0 - Inches(0.3) * 2) / 3))
-x = flow_x0
-for t, sub in [("Web app", "for humans"), ("CLI", "for scripts"), ('"Find me python jobs"', "natural-language agent")]:
-    box(s, x, rowy, w3, rh, t, sub, "plain", 15, 11)
-    x += w3 + Inches(0.3)
-arrow_down(s, SW / 2 - Inches(0.13), rowy + rh + Inches(0.06))
-rowy2 = rowy + rh + Inches(0.42)
-box(s, flow_x0, rowy2, flow_x1 - flow_x0, Inches(0.85),
-    "Flask API + Tool Registry", "every capability defined once, callable by code or by the LLM", "dark", 16, 12)
-arrow_down(s, SW / 2 - Inches(0.13), rowy2 + Inches(0.91))
-rowy3 = rowy2 + Inches(1.27)
-w5 = Emu(int((flow_x1 - flow_x0 - Inches(0.22) * 4) / 5))
-x = flow_x0
-for t, sub in [("scraper", "10 sources"), ("matching", "score + rank"), ("generate", "resume · letter · PDF"),
-               ("autofill", "real forms"), ("tracker", "what you've seen")]:
-    box(s, x, rowy3, w5, Inches(0.85), t, sub, "soft", 14, 10)
-    x += w5 + Inches(0.22)
-arrow_down(s, SW / 2 - Inches(0.13), rowy3 + Inches(0.91))
-rowy4 = rowy3 + Inches(1.27)
-w4 = Emu(int((flow_x1 - flow_x0 - Inches(0.25) * 3) / 4))
-x = flow_x0
-for t, sub in [("Job board APIs", ""), ("Company career APIs", "Greenhouse · Lever · Ashby · SmartRecruiters"),
-               ("Groq LLM", "llama-3.3-70b"), ("Your Chrome", "PDFs + autofill")]:
-    box(s, x, rowy4, w4, Inches(0.95), t, sub, "plain", 14, 10)
-    x += w4 + Inches(0.25)
+# ============================== 7a · INTERFACES ==============================
+s = slide("Architecture part 1: three doors into the same engine. Users click, scripts type, or you just ask in plain language.")
+eyebrow(s, "04 · Architecture — 1 of 3")
+title(s, [("Three ways in, ", False), ("one engine", True)])
+flow(s, Inches(2.6), [
+    ("Web app", "for humans — buttons and forms", "plain"),
+    ("Terminal", "for scripts and power users", "plain"),
+    ('"Find me python jobs"', "plain-language agent mode", "plain"),
+], h=Inches(1.7), tsize=20, ssize=14)
+tb = textbox(s, Inches(0.75), Inches(5.0), Inches(11.8), Inches(1.4))
+p = para(tb.text_frame, True)
+run(p, "All three call the exact same engine underneath — nothing is duplicated.", 24, INK)
+
+# ============================== 7b · THE ENGINE ==============================
+s = slide("Architecture part 2: the tool registry is the key design move — every capability defined once, callable by code or by the AI. Below it, five focused modules.")
+eyebrow(s, "04 · Architecture — 2 of 3")
+title(s, [("The engine: ", False), ("one registry, five modules", True)], size=34)
+box(s, Inches(0.75), Inches(2.2), Inches(11.83), Inches(1.05),
+    "Flask API + Tool Registry", "every capability defined once — callable by code or by the LLM", "dark", 20, 14)
+arrow_down(s, SW / 2 - Inches(0.13), Inches(3.4))
+flow(s, Inches(3.85), [
+    ("scraper", "finds jobs on 10 sources", "soft"),
+    ("matching", "scores each job 0–100", "soft"),
+    ("generate", "resume · letter · PDF", "soft"),
+    ("autofill", "fills real forms", "soft"),
+    ("tracker", "remembers everything", "soft"),
+], h=Inches(1.5), tsize=17, ssize=12)
+
+# ============================== 7c · OUTSIDE WORLD ==============================
+s = slide("Architecture part 3: everything external the engine talks to. Note: the LLM is just one of four external services — not the center of the system.")
+eyebrow(s, "04 · Architecture — 3 of 3")
+title(s, [("What it talks to ", False), ("out there", True)])
+flow(s, Inches(2.6), [
+    ("Job board APIs", "Remotive · RemoteOK · Jobicy · HN …", "plain"),
+    ("Company career APIs", "Greenhouse · Lever · Ashby · SmartRecruiters", "plain"),
+    ("Groq LLM", "llama-3.3-70b — the AI", "plain"),
+    ("Your Chrome", "makes PDFs + fills forms", "plain"),
+], h=Inches(1.7), tsize=18, ssize=13)
+tb = textbox(s, Inches(0.75), Inches(5.0), Inches(11.8), Inches(1.2))
+p = para(tb.text_frame, True)
+run(p, "All public, documented interfaces — no scraping tricks, no logins, no rule-breaking.", 22, INK)
 
 # ============================== 8 · WHERE THE AI IS ==============================
-s = slide("Architecture principle: no orchestrator agent. The flow is plain code; the LLM is used only at the four points that need judgment. Each AI step can fail and the pipeline still completes.")
+s = slide("Architecture principle: no orchestrator agent. The flow is plain code; the LLM is used only at the points that need judgment. Each AI step can fail and the pipeline still completes.")
 eyebrow(s, "04 · Architecture principle")
 title(s, [("Deterministic pipeline.\n", False), ("AI only where judgment is needed.", True)], size=34)
 flow(s, Inches(2.9), [
@@ -315,147 +324,183 @@ flow(s, Inches(2.9), [
 ], h=Inches(1.15))
 tb = textbox(s, Inches(0.75), Inches(4.7), Inches(11.8), Inches(2))
 p = para(tb.text_frame, True)
-run(p, "No “orchestrator agent” deciding what to do next: the flow is code, so it never gets lost and never burns tokens on planning — and every AI step can fail ", 21, INK)
+run(p, "No \u201corchestrator agent\u201d deciding what to do next: the flow is code, so it never gets lost and never burns tokens on planning \u2014 and every AI step can fail ", 21, INK)
 run(p, "without breaking the pipeline", 21, INK, True)
 run(p, ".", 21, INK)
 
-# ============================== 9 · TOOLS ==============================
-s = slide("What a tool literally is: a JSON schema plus the Python function. Same registry serves the fixed pipeline and the LLM. Tools return summaries, not dumps.")
-eyebrow(s, "05 · Agents & tools")
+# ============================== 9a · WHAT IS A TOOL ==============================
+s = slide("What a tool literally is: a JSON description the AI can read, plus the real Python function. This is the actual search_jobs tool from the code.")
+eyebrow(s, "05 · Agents & tools — 1 of 2")
 title(s, [("A tool = a function ", False), ("the model may call", True)], size=34)
-term(s, Inches(0.75), Inches(2.2), Inches(6.4), Inches(4.4), [
+term(s, Inches(1.9), Inches(2.3), Inches(9.5), Inches(4.4), [
     [("{ ", TERMTXT), ('"name"', TERMBLUE), (": ", TERMTXT), ('"search_jobs"', TERMGREEN), (",", TERMTXT)],
-    [('  "description"', TERMBLUE), (": ", TERMTXT), ('"Search job', TERMGREEN)],
-    [('     boards. Returns count', TERMGREEN)],
-    [('     and sample titles."', TERMGREEN), (",", TERMTXT)],
+    [('  "description"', TERMBLUE), (": ", TERMTXT), ('"Search job boards.', TERMGREEN)],
+    [('     Returns count and sample titles."', TERMGREEN), (",", TERMTXT)],
     [('  "parameters"', TERMBLUE), (": {", TERMTXT)],
     [('    "keywords"', TERMBLUE), (": ", TERMTXT), ("array of string", TERMGREEN), (",", TERMTXT)],
     [('    "remote"', TERMBLUE), (":   ", TERMTXT), ("boolean", TERMGREEN), (",", TERMTXT)],
     [('    "limit"', TERMBLUE), (":    ", TERMTXT), ("integer", TERMGREEN), (" } }", TERMTXT)],
     [("", TERMTXT)],
-    [("# + the Python function", TERMDIM)],
-    [("#   that actually runs it", TERMDIM)],
-], size=15)
-bullets(s, [
-    ("✓", GOOD, [("6 tools: search, rank, list, generate, answer, profile", False)]),
-    ("✓", GOOD, [("One registry, ", False), ("two callers", True), (": the fixed pipeline — and the LLM itself", False)]),
-    ("✓", GOOD, [("Tools return short summaries, not raw data — keeps the model focused", False)]),
-], Inches(2.5), size=20, x=Inches(7.5), w=Inches(5.2), gap=16)
+    [("# + the Python function that actually runs it", TERMDIM)],
+], size=18)
 
-# ============================== 10 · AGENT LOOP ==============================
-s = slide("The classic tool-calling loop with a real trace from this system: three tool calls, then a plain answer. This is the 'agent' in Job Agent.")
-eyebrow(s, "05 · Agents & tools — the loop")
-title(s, [("The agent loop, ", False), ("for real", True)], size=36)
-ly = Inches(2.15)
+# ============================== 9b · ONE REGISTRY, TWO CALLERS ==============================
+s = slide("The design move: the same six tools serve two callers. Buttons call them in a fixed order; the AI chooses freely in agent mode. Tools return short summaries to keep the model focused.")
+eyebrow(s, "05 · Agents & tools — 2 of 2")
+title(s, [("One registry, ", False), ("two callers", True)])
+box(s, Inches(3.9), Inches(2.3), Inches(5.5), Inches(1.0),
+    "6 tools in one registry", "search · rank · list · generate · answer · profile", "dark", 18, 13)
+arrow_down(s, Inches(4.4), Inches(3.45))
+arrow_down(s, Inches(8.75), Inches(3.45))
+box(s, Inches(1.4), Inches(3.9), Inches(5.0), Inches(1.5),
+    "The fixed pipeline", "buttons & terminal call tools in a set order — cheap, reliable", "plain", 18, 13)
+box(s, Inches(6.9), Inches(3.9), Inches(5.0), Inches(1.5),
+    "The AI (agent mode)", "reads the descriptions and chooses tools itself", "soft", 18, 13)
+tb = textbox(s, Inches(0.75), Inches(5.8), Inches(11.8), Inches(1))
+p = para(tb.text_frame, True)
+run(p, "Tools return short summaries, not raw data — the model stays focused and cheap.", 22, INK)
+
+# ============================== 10a · AGENT LOOP CONCEPT ==============================
+s = slide("The agent loop in four steps. Key point on step 3: the AI never runs anything itself — it asks, our code executes, and the result is fed back.")
+eyebrow(s, "05 · The agent loop — 1 of 2")
+title(s, [("The agent loop, ", False), ("step by step", True)])
+ly = Inches(2.3)
 for i, (t, sub) in enumerate([
-    ("1 · User asks in plain language", ""),
-    ("2 · LLM sees the tool schemas", "picks a tool + arguments"),
-    ("3 · We run the real function", "result goes back as JSON"),
-    ("4 · Repeat until it can answer", ""),
+    ("1 · You ask in plain language", '"find remote python jobs, show top 3"'),
+    ("2 · The AI sees the six tool descriptions", "and picks a tool + arguments"),
+    ("3 · Our code runs the real function", "the AI only asks — it never executes anything itself"),
+    ("4 · Result goes back in; repeat until it can answer", ""),
 ]):
-    box(s, Inches(0.75), ly, Inches(5.3), Inches(0.95), t, sub, "soft" if i % 2 else "plain", 16, 12)
-    ly += Inches(1.13)
-term(s, Inches(6.5), Inches(2.15), Inches(6.1), Inches(4.5), [
-    [("# actual run:", TERMDIM)],
+    box(s, Inches(1.6), ly, Inches(10.1), Inches(1.02), t, sub, "soft" if i % 2 else "plain", 19, 14)
+    ly += Inches(1.18)
+
+# ============================== 10b · AGENT LOOP TRACE ==============================
+s = slide("The same loop, recorded for real: three tool calls, then a plain-text answer. This trace is from an actual run of the project.")
+eyebrow(s, "05 · The agent loop — 2 of 2")
+title(s, [("A real recorded run", False)])
+term(s, Inches(1.2), Inches(2.25), Inches(10.9), Inches(4.5), [
     [("$ agent ", TERMTXT), ('"find remote python jobs,', TERMGREEN)],
     [('         show top 3, don\'t apply"', TERMGREEN)],
     [("", TERMTXT)],
-    [("→ tool: ", TERMTXT), ("search_jobs", TERMBLUE), ('({"keywords":', TERMTXT)],
-    [('        ["python"],"remote":true})', TERMTXT)],
+    [("\u2192 tool: ", TERMTXT), ("search_jobs", TERMBLUE), ('({"keywords": ["python"],', TERMTXT)],
+    [('               "remote": true})', TERMTXT)],
     [('   {"found": 14, ...}', TERMDIM)],
-    [("→ tool: ", TERMTXT), ("rank_jobs", TERMBLUE), ('({"top": 3})', TERMTXT)],
+    [("\u2192 tool: ", TERMTXT), ("rank_jobs", TERMBLUE), ('({"top": 3})', TERMTXT)],
     [('   {"ranked": 14, ...}', TERMDIM)],
-    [("→ tool: ", TERMTXT), ("list_ranked", TERMBLUE), ('({"top": 3})', TERMTXT)],
+    [("\u2192 tool: ", TERMTXT), ("list_ranked", TERMBLUE), ('({"top": 3})', TERMTXT)],
     [("", TERMTXT)],
-    [('"Your top 3 matches are: …"', TERMGREEN)],
-], size=14)
+    [('"Your top 3 matches are: \u2026"', TERMGREEN)],
+], size=17)
 
-# ============================== 11 · SPECIALISTS ==============================
-s = slide("Six narrow prompts instead of one giant one. Each has one job and its own guardrail. Green = the quality-control pair.")
-eyebrow(s, "06 · The AI cast")
-title(s, [("Six specialists, ", False), ("not one genius", True)], size=36)
+# ============================== 11a · SPECIALISTS 1 ==============================
+s = slide("Six specialists instead of one giant prompt — part 1: the three everyday workers. Each has one narrow prompt, one job, its own guardrail.")
+eyebrow(s, "06 · The AI cast — 1 of 2")
+title(s, [("Six specialists, ", False), ("not one genius", True)])
 cards = [
-    ("Ranker", "judges fit 0–100 with strengths & gaps", "soft"),
-    ("Tailor", "rewrites resume + letter for one job, in the posting's language", "soft"),
-    ("Reviewer", "hunts invented facts, wrong company, wrong language", "good"),
-    ("Repairer", "rewrites only what the Reviewer flagged", "good"),
-    ("Answerer", "answers any form question — or says \"not in profile\"", "soft"),
-    ("Company Scout", "proposes local employers, verified against real APIs", "soft"),
+    ("Ranker", "reads a posting like a recruiter; judges fit 0\u2013100 with strengths & gaps", "soft"),
+    ("Tailor", "rewrites resume + cover letter for one job, in the posting's language", "soft"),
+    ("Answerer", "answers any form question from your profile \u2014 or honestly says \u201cnot in profile\u201d", "soft"),
 ]
-cw, ch = Inches(3.85), Inches(1.5)
 for i, (t, sub, st) in enumerate(cards):
-    x = Inches(0.75) + (cw + Inches(0.25)) * (i % 3)
-    y = Inches(2.3) + (ch + Inches(0.3)) * (i // 3)
-    box(s, x, y, cw, ch, t, sub, st, 18, 13)
-tb = textbox(s, Inches(0.75), Inches(6.1), Inches(11.8), Inches(0.7))
+    box(s, Inches(0.75) + Inches(4.1) * i, Inches(2.6), Inches(3.85), Inches(2.4), t, sub, st, 22, 15)
+tb = textbox(s, Inches(0.75), Inches(5.6), Inches(11.8), Inches(0.8))
 p = para(tb.text_frame, True)
-run(p, "Each has one narrow prompt, one job, and its own guardrail.", 22, INK)
+run(p, "Each gets one narrow prompt and returns structured JSON — nothing free-form.", 22, INK)
 
-# ============================== 12 · WRITER→CRITIC→FIX ==============================
-s = slide("The multi-agent quality gate. Tell the story: we planted a fake PhD and the wrong company — the reviewer caught all five issues and the repair pass came back clean.")
-eyebrow(s, "06 · Multi-agent quality gate")
-title(s, [("Writer → Critic → Fix: ", False), ("catching AI lies", True)], size=34)
-flow(s, Inches(2.3), [
+# ============================== 11b · SPECIALISTS 2 ==============================
+s = slide("Part 2: the quality pair that checks the writer's work (green), and the scout that finds employers in your country — every suggestion verified against real APIs.")
+eyebrow(s, "06 · The AI cast — 2 of 2")
+title(s, [("…and the ", False), ("quality control", True)])
+cards = [
+    ("Reviewer", "hunts invented facts, wrong company, wrong language in every draft", "good"),
+    ("Repairer", "rewrites only what the Reviewer flagged \u2014 keeps the rest", "good"),
+    ("Company Scout", "proposes employers in your country \u2014 each verified against real career APIs before use", "soft"),
+]
+for i, (t, sub, st) in enumerate(cards):
+    box(s, Inches(0.75) + Inches(4.1) * i, Inches(2.6), Inches(3.85), Inches(2.4), t, sub, st, 22, 15)
+tb = textbox(s, Inches(0.75), Inches(5.6), Inches(11.8), Inches(0.8))
+p = para(tb.text_frame, True)
+run(p, "The AI can propose; reality decides. Nothing unverified reaches you.", 22, INK)
+
+# ============================== 12a · QUALITY GATE FLOW ==============================
+s = slide("The multi-agent quality gate: every prepared application passes writer, then critic, then fixer — before you ever see it. The profile is the only source of truth.")
+eyebrow(s, "06 · Multi-agent quality gate — 1 of 2")
+title(s, [("Writer → Critic → Fix", False)])
+flow(s, Inches(2.7), [
     ("Tailor writes", "draft resume + letter", "soft"),
-    ("Reviewer checks every claim", "profile is the only source of truth", "good"),
-    ("Repairer fixes", "then it ships", "soft"),
-], h=Inches(1.3))
-tb = textbox(s, Inches(0.75), Inches(4.3), Inches(11.9), Inches(2.4))
+    ("Reviewer checks every claim", "your profile is the only source of truth", "good"),
+    ("Repairer fixes", "only the flagged problems", "soft"),
+    ("It ships", "clean documents + PDFs", "dark"),
+], h=Inches(1.7), tsize=18, ssize=13)
+
+# ============================== 12b · CAUGHT EXAMPLE ==============================
+s = slide("Tell the story: we planted a fake PhD, fake years, a Nobel Prize, and the wrong company. The reviewer caught all five; after repair, the re-check came back clean.")
+eyebrow(s, "06 · Multi-agent quality gate — 2 of 2")
+title(s, [("Catching ", False), ("AI lies", True), (" — a real test", False)], size=38)
+tb = textbox(s, Inches(0.9), Inches(2.5), Inches(11.5), Inches(4))
 tf = tb.text_frame
 p = para(tf, True)
-run(p, " CAUGHT IN TESTING ", 16, WHITE, True).font.highlight_color = None
-p.runs[0].font.color.rgb = WHITE
-# simple badge look: colored text prefix instead of shape
-p = tf.paragraphs[0]
-p.clear()
-run(p, "CAUGHT IN TESTING:  ", 18, BAD, True)
-run(p, "draft claimed a ", 20, INK)
-run(p, "PhD in Physics", 20, INK, True)
-run(p, ", ", 20, INK)
-run(p, "“10 years of experience”", 20, INK, True)
-run(p, ", and addressed the ", 20, INK)
-run(p, "wrong company", 20, INK, True)
-p2 = tf.add_paragraph()
-p2.space_before = Pt(14)
-run(p2, "AFTER REPAIR:  ", 18, GOOD, True)
-run(p2, "5 of 5 issues removed — re-review came back clean", 20, INK)
+run(p, "CAUGHT IN TESTING", 20, BAD, True)
+p2 = tf.add_paragraph(); p2.space_before = Pt(6)
+run(p2, "The draft claimed a ", 24, INK)
+run(p2, "PhD in Physics", 24, INK, True)
+run(p2, ", ", 24, INK)
+run(p2, "\u201c10 years of experience\u201d", 24, INK, True)
+run(p2, ", a ", 24, INK)
+run(p2, "Nobel Prize", 24, INK, True)
+run(p2, " \u2014 and addressed the ", 24, INK)
+run(p2, "wrong company", 24, INK, True)
+p3 = tf.add_paragraph(); p3.space_before = Pt(26)
+run(p3, "AFTER REPAIR", 20, GOOD, True)
+p4 = tf.add_paragraph(); p4.space_before = Pt(6)
+run(p4, "5 of 5 issues removed \u2014 the re-review came back clean \u2713", 24, INK)
 
 # ============================== 13 · GUARDRAILS ==============================
 s = slide("Safety by construction: grounded generation, a second AI pass on everything, verified discovery, and a hard rule — the software cannot click Submit.")
 eyebrow(s, "07 · Guardrails")
 title(s, [("Autonomous, ", False), ("not reckless", True)])
 bullets(s, [
-    ("✓", GOOD, [("Documents may only use facts ", False), ("from your profile", True)]),
-    ("✓", GOOD, [("Every packet is fact-checked by a second AI pass", False)]),
-    ("✓", GOOD, [("AI-suggested companies are ", False), ("verified against real APIs", True), (" before use", False)]),
-    ("✕", BAD, [("It never clicks Submit — ", False), ("ever", True)]),
-    ("✓", GOOD, [("Your data and API key stay on ", False), ("your", True), (" machine or browser", False)]),
+    ("\u2713", GOOD, [("Documents may only use facts ", False), ("from your profile", True)]),
+    ("\u2713", GOOD, [("Every packet is fact-checked by a second AI pass", False)]),
+    ("\u2713", GOOD, [("AI-suggested companies are ", False), ("verified against real APIs", True), (" before use", False)]),
+    ("\u2715", BAD, [("It never clicks Submit \u2014 ", False), ("ever", True)]),
+    ("\u2713", GOOD, [("Your data and API key stay on ", False), ("your", True), (" machine or browser", False)]),
 ], Inches(2.6), size=25, gap=14)
 
-# ============================== 14 · AUTOFILL ==============================
-s = slide("The form-filler agent drives the user's own Chrome via Playwright. Deterministic code fills standard fields; the LLM answers open questions; it always stops before Submit.")
-eyebrow(s, "08 · The form-filler agent")
+# ============================== 14a · AUTOFILL FLOW ==============================
+s = slide("The form-filler agent, step by step. Plain code answers standard fields; the AI answers open questions; and it always stops before Submit.")
+eyebrow(s, "08 · The form-filler — 1 of 2")
 title(s, [("It fills the ", False), ("real", True), (" application form", False)], size=34)
-flow(s, Inches(2.1), [
-    ("Detect the form system", "Greenhouse / Lever", "plain"),
-    ("Open your Chrome", "scan every field", "soft"),
+flow(s, Inches(2.7), [
+    ("Detect the form system", "Greenhouse / Lever \u2014 aggregator links traced to the real form", "plain"),
+    ("Open your Chrome", "a script lists every field on the page", "soft"),
     ("Fill + upload resume", "code for standard fields, AI for open questions", "soft"),
-    ("STOP", "gaps highlighted — you review and submit", "dark"),
-], h=Inches(1.25))
-add_shot(s, f"{S}/pres-autofill.jpg", Inches(3.65), 3.6)
+    ("STOP", "gaps highlighted \u2014 you review and submit", "dark"),
+], h=Inches(1.8), tsize=17, ssize=13)
 
-# ============================== 15 · SOURCES ==============================
-s = slide("Coverage: 9 keyless boards plus the country layer — 109 verified company boards shipped, and AI discovery (verified, cached) for any other country.")
-eyebrow(s, "09 · Where the jobs come from")
-title(s, [("10 boards + your country's ", False), ("actual companies", True)], size=32)
-box(s, Inches(0.75), Inches(2.25), Inches(5.7), Inches(1.9), "9 public job boards",
-    "Remotive · RemoteOK · Arbeitnow · Jobicy · Himalayas · WeWorkRemotely · Hacker News · The Muse · Working Nomads", "plain", 17, 13)
-box(s, Inches(0.75), Inches(4.45), Inches(5.7), Inches(1.5), "Aggregators (optional)",
-    "Jooble ~69 countries incl. Israel · Adzuna 20 countries", "plain", 17, 13)
-box(s, Inches(6.85), Inches(2.25), Inches(5.7), Inches(1.9), "Company career pages — automatic",
-    "109 verified employers shipped for 9 countries. Israel: NICE · Via · Cato · Gong · Similarweb · Taboola · JFrog …", "soft", 17, 13)
-box(s, Inches(6.85), Inches(4.45), Inches(5.7), Inches(1.5), "Unknown country?",
-    "AI proposes employers → each verified live → cached. Spain test: 3 companies, 83 real openings", "good", 17, 13)
+# ============================== 14b · AUTOFILL PROOF ==============================
+s = slide("Proof on a real company's form (GitLab): name, email, phone filled, resume attached — and the green banner reminding you the last click is yours.")
+eyebrow(s, "08 · The form-filler — 2 of 2")
+title(s, [("A real form, ", False), ("really filled", True)], size=34)
+add_shot(s, f"{S}/pres-autofill.jpg", Inches(2.1), 4.9)
+
+# ============================== 15a · SOURCES: BOARDS ==============================
+s = slide("Where the jobs come from, part 1: nine public job boards searched in parallel, plus two optional aggregators unlocked with free keys.")
+eyebrow(s, "09 · Where the jobs come from — 1 of 2")
+title(s, [("9 public boards, ", False), ("searched at once", True)], size=34)
+box(s, Inches(0.75), Inches(2.4), Inches(11.83), Inches(1.9), "Always on \u2014 no keys, no accounts",
+    "Remotive \u00b7 RemoteOK \u00b7 Arbeitnow \u00b7 Jobicy \u00b7 Himalayas \u00b7 WeWorkRemotely \u00b7 Hacker News \u201cWho is hiring\u201d \u00b7 The Muse \u00b7 Working Nomads", "plain", 20, 16)
+box(s, Inches(0.75), Inches(4.6), Inches(11.83), Inches(1.6), "Optional aggregators (free keys in Settings)",
+    "Jooble \u2014 ~69 countries incl. Israel \u00b7 Adzuna \u2014 20 countries of local on-site jobs", "soft", 20, 16)
+
+# ============================== 15b · SOURCES: COMPANIES ==============================
+s = slide("Part 2: the country layer. 109 verified company boards ship with the app (29 Israeli). For any other country, the AI proposes employers and each one is verified live, then cached.")
+eyebrow(s, "09 · Where the jobs come from — 2 of 2")
+title(s, [("…plus your country's ", False), ("actual companies", True)], size=34)
+box(s, Inches(0.75), Inches(2.4), Inches(11.83), Inches(1.9), "Automatic from your profile's country",
+    "109 verified employers shipped for 9 countries. Israel: NICE \u00b7 Via \u00b7 Cato \u00b7 Gong \u00b7 Similarweb \u00b7 Taboola \u00b7 JFrog \u00b7 Fireblocks \u00b7 AppsFlyer \u2026 (29 total)", "soft", 20, 15)
+box(s, Inches(0.75), Inches(4.6), Inches(11.83), Inches(1.6), "Unknown country? The AI scouts it",
+    "AI proposes employers \u2192 each verified against real career APIs \u2192 cached 30 days. Spain test: Cabify, Typeform, Wallapop \u2014 83 real openings", "good", 20, 15)
 
 # ============================== 16 · BILINGUAL ==============================
 s = slide("Language follows the posting, not the profile. Hebrew needed real bidi work — and Hebrew quote marks even broke the model's JSON until we added a repair layer.")
@@ -525,6 +570,6 @@ tb = textbox(s, Inches(0.75), Inches(5.2), Inches(11.8), Inches(0.6))
 p = para(tb.text_frame, True)
 run(p, "Python · Flask · Groq (llama-3.3-70b) · Playwright · your own Chrome", 18, MUTED)
 
-OUT = "/Users/davidzeff/Desktop/Job Agent Presentation.pptx"
+OUT = str(pathlib.Path(__file__).resolve().parent / "Job Agent Presentation.pptx")
 prs.save(OUT)
 print("saved:", OUT, "| slides:", len(prs.slides.__iter__.__self__._sldIdLst))
