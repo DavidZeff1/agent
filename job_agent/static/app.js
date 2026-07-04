@@ -1166,6 +1166,19 @@ async function init() {
 
 async function initInner() {
   STATUS = await apiRetry('status', 4);
+
+  // Self-heal stale pages: if this page's build stamp doesn't match the server's,
+  // reload once via a fresh URL (the query defeats any cached copy).
+  const meta = document.querySelector('meta[name="ja-build"]');
+  const pageBuild = meta ? meta.content : 'missing';
+  if (STATUS.build && pageBuild !== STATUS.build && pageBuild !== 'dev') {
+    if (!location.search.includes('v=')) {
+      location.replace(location.pathname + '?v=' + STATUS.build);
+      return;
+    }
+    console.warn('Page build', pageBuild, 'differs from server', STATUS.build, '— continuing anyway.');
+  }
+
   renderHeader();
   $$('.nboards').forEach(n => { n.textContent = STATUS.sources || 7; });
   buildDatalists();

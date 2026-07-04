@@ -238,9 +238,16 @@ def create_app() -> Flask:
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"
         return resp
 
+    # Build stamp = newest static file's mtime. The page carries it in a meta tag and the
+    # API reports it; when they disagree (a stale tab or cached page), the page reloads
+    # itself fresh — nobody should ever have to know what a hard refresh is.
+    build = str(int(max(p.stat().st_mtime for p in STATIC_DIR.glob("*.*"))))
+    app.config["JA_BUILD"] = build
+
     @app.get("/")
     def index():
-        return send_from_directory(STATIC_DIR, "index.html")
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        return html.replace('name="ja-build" content="dev"', f'name="ja-build" content="{build}"')
 
     # -- status & settings ---------------------------------------------------
 
@@ -250,6 +257,7 @@ def create_app() -> Flask:
         s = get_settings()
         return jsonify({
             "hosted": IS_HOSTED,
+            "build": app.config.get("JA_BUILD", ""),
             "has_profile": bool(profile and (profile.full_name or profile.skills)),
             "name": (profile.preferred_name or profile.full_name) if profile else "",
             "ai": bool((request.headers.get("X-Groq-Key") or "").strip()) or llm_available(),
