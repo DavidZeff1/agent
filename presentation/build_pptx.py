@@ -163,6 +163,7 @@ def term(s, x, y, w, h, lines, size=13):
     tf.margin_top = tf.margin_bottom = Inches(0.16)
     for i, line_runs in enumerate(lines):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = PP_ALIGN.LEFT  # autoshape text defaults to centered
         for text, color in line_runs:
             run(p, text, size, color, font=FMONO)
     return sh
@@ -328,9 +329,27 @@ run(p, "No \u201corchestrator agent\u201d deciding what to do next: the flow is 
 run(p, "without breaking the pipeline", 21, INK, True)
 run(p, ".", 21, INK)
 
+# ============================== 8b · RANK IN PRACTICE ==============================
+s = slide("The principle made concrete with ranking: transparent math scores every job (weights on screen), the AI re-ranks only the top 10, and the final score is a 50/50 blend. If the AI call fails, the math score simply stands.")
+eyebrow(s, "04 · The principle in practice")
+title(s, [("Example: how ", False), ("Rank", True), (" really works", False)], size=36)
+for i, (n, l) in enumerate([
+    ("40%", "skills overlap"),
+    ("27%", "title match"),
+    ("18%", "location & remote"),
+    ("15%", "seniority fit"),
+]):
+    box(s, Inches(0.75) + Inches(3.02) * i, Inches(2.3), Inches(2.78), Inches(1.1), n, l, "plain", 24, 13)
+flow(s, Inches(3.95), [
+    ("Math scores every job", "0–100 with plain-language reasons — instant, free, works with no AI at all", "plain"),
+    ("AI re-ranks the top 10", "a recruiter prompt returns score, verdict, strengths, gaps", "soft"),
+    ("Final = 50 / 50 blend", "neither the math nor the model decides alone", "dark"),
+], h=Inches(1.7), tsize=18, ssize=13)
+caption(s, [("If the AI call fails, the math score stands — ranking ", False), ("never breaks", True), (".", False)], Inches(6.2))
+
 # ============================== 9a · WHAT IS A TOOL ==============================
 s = slide("What a tool literally is: a JSON description the AI can read, plus the real Python function. This is the actual search_jobs tool from the code.")
-eyebrow(s, "05 · Agents & tools — 1 of 2")
+eyebrow(s, "05 · Agents & tools — 1 of 5")
 title(s, [("A tool = a function ", False), ("the model may call", True)], size=34)
 term(s, Inches(1.9), Inches(2.3), Inches(9.5), Inches(4.4), [
     [("{ ", TERMTXT), ('"name"', TERMBLUE), (": ", TERMTXT), ('"search_jobs"', TERMGREEN), (",", TERMTXT)],
@@ -344,9 +363,31 @@ term(s, Inches(1.9), Inches(2.3), Inches(9.5), Inches(4.4), [
     [("# + the Python function that actually runs it", TERMDIM)],
 ], size=18)
 
+# ============================== 9a2 · THE TOOL SYSTEM IN CODE ==============================
+s = slide("Show that a tool is not magic: one dataclass with four fields, and a registry that is literally a dict. to_schema() emits exactly the shape the LLM API expects. The whole tool system is about 60 lines of code.")
+eyebrow(s, "05 · Agents & tools — 2 of 5")
+title(s, [("The whole tool system, ", False), ("in code", True)], size=34)
+term(s, Inches(1.55), Inches(2.2), Inches(10.2), Inches(4.45), [
+    [("@dataclass", TERMBLUE)],
+    [("class Tool:", TERMTXT)],
+    [("    name: str          ", TERMTXT), ('# "search_jobs"', TERMDIM)],
+    [("    description: str   ", TERMTXT), ("# what the model reads", TERMDIM)],
+    [("    parameters: dict   ", TERMTXT), ("# JSON Schema of the arguments", TERMDIM)],
+    [("    func: Callable     ", TERMTXT), ("# the real Python function", TERMDIM)],
+    [("", TERMTXT)],
+    [("    def to_schema(self):   ", TERMTXT), ("# the exact shape the API wants", TERMDIM)],
+    [('        return {"type": "function", "function": {…}}', TERMGREEN)],
+    [("", TERMTXT)],
+    [("class ToolRegistry:", TERMTXT)],
+    [("    _tools: dict[str, Tool]      ", TERMTXT), ("# the registry IS a dict", TERMDIM)],
+    [("    def schemas(self): …         ", TERMTXT), ("# all tools, for the model", TERMDIM)],
+    [("    def dispatch(self, name, args): …  ", TERMTXT), ("# run one by name", TERMDIM)],
+], size=16)
+caption(s, [("~60 lines total. A tool is just ", False), ("data + a function", True), (" — nothing more.", False)], Inches(6.85))
+
 # ============================== 9b · ONE REGISTRY, TWO CALLERS ==============================
 s = slide("The design move: the same six tools serve two callers. Buttons call them in a fixed order; the AI chooses freely in agent mode. Tools return short summaries to keep the model focused.")
-eyebrow(s, "05 · Agents & tools — 2 of 2")
+eyebrow(s, "05 · Agents & tools — 3 of 5")
 title(s, [("One registry, ", False), ("two callers", True)])
 box(s, Inches(3.9), Inches(2.3), Inches(5.5), Inches(1.0),
     "6 tools in one registry", "search · rank · list · generate · answer · profile", "dark", 18, 13)
@@ -360,9 +401,48 @@ tb = textbox(s, Inches(0.75), Inches(5.8), Inches(11.8), Inches(1))
 p = para(tb.text_frame, True)
 run(p, "Tools return short summaries, not raw data — the model stays focused and cheap.", 22, INK)
 
+# ============================== 9c · DISPATCH & ERRORS ==============================
+s = slide("Demystify tool calling: the model only ever outputs text — a tool name plus arguments as a JSON string. dispatch() runs the real function, and every possible failure goes back to the model as a JSON error message it can read and correct. Errors are feedback, not crashes.")
+eyebrow(s, "05 · Agents & tools — 4 of 5")
+title(s, [("What “calling a tool” ", False), ("actually means", True)], size=34)
+bullets(s, [
+    ("1", ACCENT, [("  The model never executes anything — it outputs ", False), ("text", True),
+                   (": a tool name + arguments as a JSON string", False)]),
+    ("2", ACCENT, [("  dispatch(): parse the JSON → look up the tool → run ", False),
+                   ("func(**args)", True), (" → return the result as JSON", False)]),
+    ("3", ACCENT, [("  Every failure becomes a ", False), ("message", True), (", never a crash:", False)]),
+], Inches(2.15), size=20, gap=8)
+term(s, Inches(1.55), Inches(4.15), Inches(10.2), Inches(2.3), [
+    [('{"error": "unknown tool \'serch_jobs\'"}', TERMGREEN), ("            # typo'd name", TERMDIM)],
+    [('{"error": "arguments were not valid JSON"}', TERMGREEN), ("        # malformed args", TERMDIM)],
+    [('{"error": "bad arguments for search_jobs: …"}', TERMGREEN), ("     # wrong params", TERMDIM)],
+    [('{"error": "ConnectionError: …"}', TERMGREEN), ("                   # the tool blew up", TERMDIM)],
+], size=15)
+caption(s, [("The error goes back into the conversation — the model reads it and ", False),
+            ("fixes its next call", True), (".", False)], Inches(6.7))
+
+# ============================== 9d · SUMMARIES, NOT BLOBS ==============================
+s = slide("Context economics: the search tool answers with a count and eight sample titles (~80 tokens), not 14 full postings (~15,000 tokens). The big data goes to a file on disk; the next tool reads the file, not the chat. This keeps every agent step fast, cheap, and inside free-tier rate limits.")
+eyebrow(s, "05 · Agents & tools — 5 of 5")
+title(s, [("Tools return summaries — ", False), ("the data stays on disk", True)], size=32)
+term(s, Inches(1.55), Inches(2.2), Inches(10.2), Inches(2.9), [
+    [("→ tool: ", TERMTXT), ("search_jobs", TERMBLUE), ('({"keywords": ["python"]})', TERMTXT)],
+    [("", TERMTXT)],
+    [('  {"found": 14,', TERMGREEN)],
+    [('   "cached_to": "~/.job_agent/jobs_cache.json",', TERMGREEN)],
+    [('   "sample": ["Python Developer @ …", …]}', TERMGREEN), ("   # ~80 tokens", TERMDIM)],
+    [("", TERMTXT)],
+    [("  NOT the 14 full postings", TERMDIM), ("                    # ~15,000 tokens", TERMDIM)],
+], size=16)
+bullets(s, [
+    ("✓", GOOD, [("The full postings go to a ", False), ("cache file", True),
+                 ("; the next tool reads the file, not the conversation", False)]),
+    ("✓", GOOD, [("Every agent step stays small → fast, cheap, and inside the free tier's rate limits", False)]),
+], Inches(5.45), size=20, gap=8)
+
 # ============================== 10a · AGENT LOOP CONCEPT ==============================
 s = slide("The agent loop in four steps. Key point on step 3: the AI never runs anything itself — it asks, our code executes, and the result is fed back.")
-eyebrow(s, "05 · The agent loop — 1 of 2")
+eyebrow(s, "06 · The agent loop — 1 of 4")
 title(s, [("The agent loop, ", False), ("step by step", True)])
 ly = Inches(2.3)
 for i, (t, sub) in enumerate([
@@ -374,9 +454,49 @@ for i, (t, sub) in enumerate([
     box(s, Inches(1.6), ly, Inches(10.1), Inches(1.02), t, sub, "soft" if i % 2 else "plain", 19, 14)
     ly += Inches(1.18)
 
+# ============================== 10a2 · THE LOOP IN REAL CODE ==============================
+s = slide("The whole agent fits on one slide — agent.py is 87 lines in the repo including documentation. Point at max_steps (a hard budget: it can never loop forever) and at the exit condition: no tool calls means the model answered in plain text.")
+eyebrow(s, "06 · The agent loop — 2 of 4")
+title(s, [("The entire agent is ", False), ("~40 lines", True)], size=34)
+term(s, Inches(1.2), Inches(2.15), Inches(10.9), Inches(4.55), [
+    [("messages = [SYSTEM_PROMPT, user_request]", TERMTXT)],
+    [("tools    = registry.schemas()", TERMTXT)],
+    [("", TERMTXT)],
+    [("for _ in range(max_steps):", TERMBLUE), ("            # 8 — a hard budget", TERMDIM)],
+    [("    msg = llm.chat(messages, tools=tools,", TERMTXT)],
+    [('                   tool_choice="auto", temperature=0.2)', TERMTXT)],
+    [("    if not msg.tool_calls:", TERMBLUE), ("        # no tool wanted =", TERMDIM)],
+    [("        return msg.content", TERMGREEN), ("         # the answer is ready", TERMDIM)],
+    [("    messages.append(assistant_turn(msg))", TERMTXT)],
+    [("    for call in msg.tool_calls:", TERMBLUE)],
+    [("        result = registry.dispatch(call.name, call.args)", TERMTXT)],
+    [('        messages.append({"role": "tool", "content": result})', TERMTXT)],
+    [("", TERMTXT)],
+    [('return "Reached the step limit…"', TERMGREEN), ("   # can never run away", TERMDIM)],
+], size=15)
+
+# ============================== 10a3 · THE MESSAGE LIST ==============================
+s = slide("The key mental model: the LLM itself is stateless. This growing list of messages IS the agent's memory — every iteration replays the whole list, and the model picks the next move. When it ends in plain text instead of a tool call, the loop is over.")
+eyebrow(s, "06 · The agent loop — 3 of 4")
+title(s, [("The agent's memory is ", False), ("just this list", True)], size=34)
+term(s, Inches(1.2), Inches(2.15), Inches(10.9), Inches(3.75), [
+    [("[system]     ", TERMDIM), ("You are a job-application assistant…", TERMTXT)],
+    [("[user]       ", TERMDIM), ('"find remote python jobs, show top 3"', TERMGREEN)],
+    [("[assistant]  ", TERMDIM), ("→ search_jobs", TERMBLUE), ('({"keywords": ["python"]})', TERMTXT)],
+    [("[tool]       ", TERMDIM), ('{"found": 14, "sample": […]}', TERMTXT)],
+    [("[assistant]  ", TERMDIM), ("→ rank_jobs", TERMBLUE), ('({"top": 3})', TERMTXT)],
+    [("[tool]       ", TERMDIM), ('{"ranked": 14, "top": […]}', TERMTXT)],
+    [("[assistant]  ", TERMDIM), ('"Your top 3 matches are: …"', TERMGREEN), ("   ← plain text: done", TERMDIM)],
+], size=16)
+bullets(s, [
+    ("✓", GOOD, [("The model is ", False), ("stateless", True),
+                 (" — each step it re-reads this whole list and decides the next move", False)]),
+    ("✓", GOOD, [("Nothing else persists between steps; when the list ends in plain text, the loop ends", False)]),
+], Inches(6.1), size=20, gap=8)
+
 # ============================== 10b · AGENT LOOP TRACE ==============================
 s = slide("The same loop, recorded for real: three tool calls, then a plain-text answer. This trace is from an actual run of the project.")
-eyebrow(s, "05 · The agent loop — 2 of 2")
+eyebrow(s, "06 · The agent loop — 4 of 4")
 title(s, [("A real recorded run", False)])
 term(s, Inches(1.2), Inches(2.25), Inches(10.9), Inches(4.5), [
     [("$ agent ", TERMTXT), ('"find remote python jobs,', TERMGREEN)],
@@ -392,9 +512,42 @@ term(s, Inches(1.2), Inches(2.25), Inches(10.9), Inches(4.5), [
     [('"Your top 3 matches are: \u2026"', TERMGREEN)],
 ], size=17)
 
+# ============================== 10c · THE LLM GATE ==============================
+s = slide("Free-tier reality: Groq budgets both requests AND tokens per minute. So one thin wrapper makes every AI call: a process-wide throttle (one clock shared by all threads), exponential backoff that honors the server's Retry-After header, and retries only for genuinely retryable errors.")
+eyebrow(s, "07 · Surviving the free tier — 1 of 2")
+title(s, [("Every AI call goes through ", False), ("one gate", True)], size=34)
+flow(s, Inches(2.5), [
+    ("Any specialist", "ranker, tailor, reviewer… none talk to the API directly", "plain"),
+    ("Throttle", "one shared clock — every thread waits its ≥2s slot", "soft"),
+    ("Groq API", "llama-3.3-70b", "plain"),
+    ("On 429 / 5xx", "backoff 2s→30s, honors Retry-After, ≤5 retries", "soft"),
+], h=Inches(1.7), tsize=17, ssize=12)
+bullets(s, [
+    ("✓", GOOD, [("The clock is shared across threads — parallel work still queues ", False), ("politely", True)]),
+    ("✓", GOOD, [("Only retryable errors retry (rate limit, overloaded, timeout); real bugs surface at once", False)]),
+], Inches(4.75), size=20, gap=8)
+caption(s, [("The free tier budgets requests ", False), ("and", True),
+            (" tokens per minute — the whole design lives inside that.", False)], Inches(6.35))
+
+# ============================== 10d · FORCING JSON ==============================
+s = slide("How structured output is forced from a prose model, in four rungs: ask in the prompt, enforce with the API's JSON mode, retry without it when Hebrew quotes break validation, then a repair parser. Only if all four fail does the step fall back — nothing ever crashes.")
+eyebrow(s, "07 · Surviving the free tier — 2 of 2")
+title(s, [("Four rungs to ", False), ("reliable JSON", True)], size=34)
+ly = Inches(2.25)
+for i, (t, sub) in enumerate([
+    ("1 · Ask", 'every system prompt ends: "Respond with a single valid JSON object and nothing else."'),
+    ("2 · Enforce", "Groq's JSON mode rejects non-JSON output at the API level"),
+    ("3 · Retry", 'JSON mode chokes on Hebrew quotes (ש"ח) — retry once without it'),
+    ("4 · Repair", "extract {…} by regex · escape quotes between Hebrew letters · parse again"),
+]):
+    box(s, Inches(1.6), ly, Inches(10.1), Inches(0.95), t, sub, "soft" if i % 2 else "plain", 19, 14)
+    ly += Inches(1.1)
+caption(s, [("Only when every rung fails does the step fall back (e.g. untailored resume) — ", False),
+            ("it never crashes", True), (".", False)], Inches(6.75))
+
 # ============================== 11a · SPECIALISTS 1 ==============================
 s = slide("Six specialists instead of one giant prompt — part 1: the three everyday workers. Each has one narrow prompt, one job, its own guardrail.")
-eyebrow(s, "06 · The AI cast — 1 of 2")
+eyebrow(s, "08 · The AI cast — 1 of 3")
 title(s, [("Six specialists, ", False), ("not one genius", True)])
 cards = [
     ("Ranker", "reads a posting like a recruiter; judges fit 0\u2013100 with strengths & gaps", "soft"),
@@ -409,7 +562,7 @@ run(p, "Each gets one narrow prompt and returns structured JSON — nothing free
 
 # ============================== 11b · SPECIALISTS 2 ==============================
 s = slide("Part 2: the quality pair that checks the writer's work (green), and the scout that finds employers in your country — every suggestion verified against real APIs.")
-eyebrow(s, "06 · The AI cast — 2 of 2")
+eyebrow(s, "08 · The AI cast — 2 of 3")
 title(s, [("…and the ", False), ("quality control", True)])
 cards = [
     ("Reviewer", "hunts invented facts, wrong company, wrong language in every draft", "good"),
@@ -422,9 +575,29 @@ tb = textbox(s, Inches(0.75), Inches(5.6), Inches(11.8), Inches(0.8))
 p = para(tb.text_frame, True)
 run(p, "The AI can propose; reality decides. Nothing unverified reaches you.", 22, INK)
 
+# ============================== 11c · PROMPT ANATOMY ==============================
+s = slide("The anti-hallucination cage inside the writer's prompt: experience is sent as a numbered list, and bullets must come back keyed by those numbers — an invented job has no index to hang on. The output language is named explicitly, and temperature drops as the job gets stricter: writer 0.35, judge 0.2, critic 0.1.")
+eyebrow(s, "08 · The AI cast — 3 of 3")
+title(s, [("Anatomy of a specialist: the Tailor's ", False), ("cage", True)], size=32)
+term(s, Inches(1.55), Inches(2.05), Inches(10.2), Inches(2.55), [
+    [("ROLES (index in brackets):", TERMTXT)],
+    [("[0]", TERMBLUE), (" Backend Developer at Acme (2022–Present); tech: Python…", TERMTXT)],
+    [("[1]", TERMBLUE), (" QA Engineer at Initech (2019–2022); tech: SQL…", TERMTXT)],
+    [("", TERMTXT)],
+    [("→ bullets must come back keyed by those indexes:", TERMDIM)],
+    [('  "experience_bullets": {"0": […], "1": […]}', TERMGREEN)],
+    [("  a job that doesn't exist has no index to hang on", TERMDIM)],
+], size=15)
+bullets(s, [
+    ("✓", GOOD, [("Rules first: ", False), ("“Use ONLY facts present in the profile. Never invent employers, titles, dates, degrees…”", True)]),
+    ("✓", GOOD, [("The output language is spelled out (“OUTPUT LANGUAGE: Hebrew”) — “match the posting” alone gets ignored", False)]),
+    ("✓", GOOD, [("Temperature ladder: Reviewer ", False), ("0.1", True), ("  ·  Ranker ", False), ("0.2", True),
+                 ("  ·  Tailor ", False), ("0.35", True), (" — creativity only where it's safe", False)]),
+], Inches(4.85), size=19, gap=9)
+
 # ============================== 12a · QUALITY GATE FLOW ==============================
 s = slide("The multi-agent quality gate: every prepared application passes writer, then critic, then fixer — before you ever see it. The profile is the only source of truth.")
-eyebrow(s, "06 · Multi-agent quality gate — 1 of 2")
+eyebrow(s, "09 · Multi-agent quality gate — 1 of 3")
 title(s, [("Writer → Critic → Fix", False)])
 flow(s, Inches(2.7), [
     ("Tailor writes", "draft resume + letter", "soft"),
@@ -435,7 +608,7 @@ flow(s, Inches(2.7), [
 
 # ============================== 12b · CAUGHT EXAMPLE ==============================
 s = slide("Tell the story: we planted a fake PhD, fake years, a Nobel Prize, and the wrong company. The reviewer caught all five; after repair, the re-check came back clean.")
-eyebrow(s, "06 · Multi-agent quality gate — 2 of 2")
+eyebrow(s, "09 · Multi-agent quality gate — 2 of 3")
 title(s, [("Catching ", False), ("AI lies", True), (" — a real test", False)], size=38)
 tb = textbox(s, Inches(0.9), Inches(2.5), Inches(11.5), Inches(4))
 tf = tb.text_frame
@@ -455,9 +628,32 @@ run(p3, "AFTER REPAIR", 20, GOOD, True)
 p4 = tf.add_paragraph(); p4.space_before = Pt(6)
 run(p4, "5 of 5 issues removed \u2014 the re-review came back clean \u2713", 24, INK)
 
+# ============================== 12c · ONE CLICK, END TO END ==============================
+s = slide("Everything behind the Prepare button: at most three AI calls (repair only runs if the reviewer flagged something) — the rest is plain code. The progress ticker in the demo is these phases reporting live. Every AI step has a fallback: tailor fails → untailored resume; review fails → draft kept; repair fails → original kept.")
+eyebrow(s, "09 · Multi-agent quality gate — 3 of 3")
+title(s, [("One click, ", False), ("end to end", True)], size=34)
+flow(s, Inches(2.25), [
+    ("POST /api/apply", "the button's only job", "plain"),
+    ("Tailor", "AI · temp 0.35", "soft"),
+    ("Review", "AI · temp 0.1", "good"),
+    ("Repair", "AI · only if flagged", "good"),
+], h=Inches(1.3), tsize=17, ssize=12)
+arrow_down(s, SW / 2 - Inches(0.13), Inches(3.68))
+flow(s, Inches(4.1), [
+    ("Render documents", "code · templates", "plain"),
+    ("Your Chrome, headless", "HTML → PDF", "plain"),
+    ("answers.json + tracker", "code", "plain"),
+    ("Packet in the UI", "copy buttons & files", "dark"),
+], h=Inches(1.3), tsize=16, ssize=12)
+bullets(s, [
+    ("✓", GOOD, [("Each phase reports progress — that's the live ticker you saw in the demo", False)]),
+    ("✓", GOOD, [("Every AI step degrades gracefully: ", False),
+                 ("tailor fails → untailored resume · review fails → draft kept", True)]),
+], Inches(5.75), size=19, gap=7)
+
 # ============================== 13 · GUARDRAILS ==============================
 s = slide("Safety by construction: grounded generation, a second AI pass on everything, verified discovery, and a hard rule — the software cannot click Submit.")
-eyebrow(s, "07 · Guardrails")
+eyebrow(s, "10 · Guardrails")
 title(s, [("Autonomous, ", False), ("not reckless", True)])
 bullets(s, [
     ("\u2713", GOOD, [("Documents may only use facts ", False), ("from your profile", True)]),
@@ -469,7 +665,7 @@ bullets(s, [
 
 # ============================== 14a · AUTOFILL FLOW ==============================
 s = slide("The form-filler agent, step by step. Plain code answers standard fields; the AI answers open questions; and it always stops before Submit.")
-eyebrow(s, "08 · The form-filler — 1 of 2")
+eyebrow(s, "11 · The form-filler — 1 of 3")
 title(s, [("It fills the ", False), ("real", True), (" application form", False)], size=34)
 flow(s, Inches(2.7), [
     ("Detect the form system", "Greenhouse / Lever \u2014 aggregator links traced to the real form", "plain"),
@@ -480,13 +676,31 @@ flow(s, Inches(2.7), [
 
 # ============================== 14b · AUTOFILL PROOF ==============================
 s = slide("Proof on a real company's form (GitLab): name, email, phone filled, resume attached — and the green banner reminding you the last click is yours.")
-eyebrow(s, "08 · The form-filler — 2 of 2")
+eyebrow(s, "11 · The form-filler — 2 of 3")
 title(s, [("A real form, ", False), ("really filled", True)], size=34)
 add_shot(s, f"{S}/pres-autofill.jpg", Inches(2.1), 4.9)
 
+# ============================== 14c · FORM-FILLER INTERNALS ==============================
+s = slide("Form-filler internals: one worker thread owns the browser because Playwright's sync API is thread-bound; a persistent Chrome profile keeps logins between runs; aggregator links are resolved by regex-hunting the real ATS URL in the page; answers go cheapest-first with a hard budget of 8 AI calls per form; and no code path clicks Submit.")
+eyebrow(s, "11 · The form-filler — 3 of 3")
+title(s, [("Inside the ", False), ("form-filler", True)], size=36)
+bullets(s, [
+    ("•", ACCENT, [("Playwright drives a ", False), ("persistent real-Chrome profile", True),
+                   (" — logins and cookies survive between runs", False)]),
+    ("•", ACCENT, [("All browser work funnels through ", False), ("one worker thread + a queue", True),
+                   (" (Playwright is thread-bound)", False)]),
+    ("•", ACCENT, [("Aggregator links are resolved by downloading the page and ", False),
+                   ("regex-finding the real Greenhouse / Lever URL", True)]),
+    ("•", ACCENT, [("A JS snippet tags every field and reports its label, type, options, and required flag", False)]),
+    ("•", ACCENT, [("Answers cheapest-first: profile fields → rule-based choices → AI, ", False),
+                   ("budgeted at 8 AI calls per form", True)]),
+    ("•", ACCENT, [("One broken field is skipped, never fatal — and ", False),
+                   ("no code path exists that clicks Submit", True)]),
+], Inches(2.35), size=20, gap=11)
+
 # ============================== 15a · SOURCES: BOARDS ==============================
 s = slide("Where the jobs come from, part 1: nine public job boards searched in parallel, plus two optional aggregators unlocked with free keys.")
-eyebrow(s, "09 · Where the jobs come from — 1 of 2")
+eyebrow(s, "12 · Where the jobs come from — 1 of 3")
 title(s, [("9 public boards, ", False), ("searched at once", True)], size=34)
 box(s, Inches(0.75), Inches(2.4), Inches(11.83), Inches(1.9), "Always on \u2014 no keys, no accounts",
     "Remotive \u00b7 RemoteOK \u00b7 Arbeitnow \u00b7 Jobicy \u00b7 Himalayas \u00b7 WeWorkRemotely \u00b7 Hacker News \u201cWho is hiring\u201d \u00b7 The Muse \u00b7 Working Nomads", "plain", 20, 16)
@@ -495,16 +709,35 @@ box(s, Inches(0.75), Inches(4.6), Inches(11.83), Inches(1.6), "Optional aggregat
 
 # ============================== 15b · SOURCES: COMPANIES ==============================
 s = slide("Part 2: the country layer. 109 verified company boards ship with the app (29 Israeli). For any other country, the AI proposes employers and each one is verified live, then cached.")
-eyebrow(s, "09 · Where the jobs come from — 2 of 2")
+eyebrow(s, "12 · Where the jobs come from — 2 of 3")
 title(s, [("…plus your country's ", False), ("actual companies", True)], size=34)
 box(s, Inches(0.75), Inches(2.4), Inches(11.83), Inches(1.9), "Automatic from your profile's country",
     "109 verified employers shipped for 9 countries. Israel: NICE \u00b7 Via \u00b7 Cato \u00b7 Gong \u00b7 Similarweb \u00b7 Taboola \u00b7 JFrog \u00b7 Fireblocks \u00b7 AppsFlyer \u2026 (29 total)", "soft", 20, 15)
 box(s, Inches(0.75), Inches(4.6), Inches(11.83), Inches(1.6), "Unknown country? The AI scouts it",
     "AI proposes employers \u2192 each verified against real career APIs \u2192 cached 30 days. Spain test: Cabify, Typeform, Wallapop \u2014 83 real openings", "good", 20, 15)
 
+# ============================== 15c · SCRAPER INTERNALS ==============================
+s = slide("Scraper internals: 12 small fetchers all normalize into one Job record; each isolates its own failures so a dead API never kills the search; up to 30 company boards are fetched on a 10-thread pool; relevance is scored client-side title-first because boards' own search is unreliable; then dedupe and a round-robin cap keep variety.")
+eyebrow(s, "12 · Where the jobs come from — 3 of 3")
+title(s, [("Inside the ", False), ("scraper", True)], size=36)
+bullets(s, [
+    ("•", ACCENT, [("One small fetcher per source — 12 of them — each normalizing into the ", False),
+                   ("same Job record", True)]),
+    ("•", ACCENT, [("A dead API prints a warning and returns nothing — ", False),
+                   ("the search itself never fails", True)]),
+    ("•", ACCENT, [("Company career boards fan out on a ", False), ("10-thread pool", True),
+                   (" — up to 30 boards per search", False)]),
+    ("•", ACCENT, [("Boards' own search is unreliable, so relevance is scored client-side: ", False),
+                   ("title hit > tag hit > description hit", True)]),
+    ("•", ACCENT, [("Dedupe by URL and title+company; company jobs capped to half the list, ", False),
+                   ("round-robin per employer", True)]),
+], Inches(2.35), size=20, gap=12)
+caption(s, [("The fetchers are the easy part — ", False), ("the aggregation layer is where quality happens", True),
+            (".", False)], Inches(6.55))
+
 # ============================== 16 · BILINGUAL ==============================
 s = slide("Language follows the posting, not the profile. Hebrew needed real bidi work — and Hebrew quote marks even broke the model's JSON until we added a repair layer.")
-eyebrow(s, "10 · Bilingual by design")
+eyebrow(s, "13 · Bilingual by design")
 title(s, [("Hebrew posting? ", False), ("Hebrew resume.", True)])
 bullets(s, [
     ("✓", GOOD, [("The ", False), ("posting's language", True), (" decides the documents' language — not the profile's", False)]),
@@ -512,9 +745,31 @@ bullets(s, [
     ("✓", GOOD, [("Hebrew quotes broke the model's JSON (ש\"ח) — fixed with an automatic repair layer", False)]),
 ], Inches(2.7), size=24, gap=16)
 
+# ============================== 16b · NO DATABASE ==============================
+s = slide("No database: the entire state is a readable folder of JSON files — which is also why tools can answer with tiny summaries; the data sits in files between stages. Everything is debuggable with a text editor. Hosted mode swaps this folder for the visitor's browser storage and the server stays stateless.")
+eyebrow(s, "14 · State & storage")
+title(s, [("No database. ", False), ("State is a folder of files.", True)], size=34)
+term(s, Inches(1.55), Inches(2.1), Inches(10.2), Inches(3.5), [
+    [("~/.job_agent/", TERMBLUE)],
+    [("  profile.json          ", TERMTXT), ("# your profile — the single source of truth", TERMDIM)],
+    [("  jobs_cache.json       ", TERMTXT), ("# the last search's results", TERMDIM)],
+    [("  ranked.json           ", TERMTXT), ("# the scored & sorted list", TERMDIM)],
+    [("  seen.json             ", TERMTXT), ("# every job ever seen + its status", TERMDIM)],
+    [("  companies_cache.json  ", TERMTXT), ("# AI-discovered employers (30-day TTL)", TERMDIM)],
+    [("  applications/", TERMTXT)],
+    [("    acme__backend-dev/  ", TERMTXT), ("# resume.md · resume.pdf · cover_letter.md", TERMDIM)],
+    [("                        ", TERMTXT), ("# answers.json · job.md", TERMDIM)],
+    [("  browser/              ", TERMTXT), ("# the persistent Chrome profile", TERMDIM)],
+], size=15)
+bullets(s, [
+    ("✓", GOOD, [("Each stage writes files, the next reads them — ", False),
+                 ("files are the interface between stages", True)]),
+    ("✓", GOOD, [("Hosted mode swaps this folder for the visitor's own browser storage — the server stays stateless", False)]),
+], Inches(5.85), size=19, gap=8)
+
 # ============================== 17 · DEPLOYMENT ==============================
 s = slide("Same codebase, one flag. Desktop has the machine-bound powers; the hosted version is stateless — each visitor's data lives in their own browser.")
-eyebrow(s, "11 · Runs anywhere")
+eyebrow(s, "15 · Runs anywhere")
 title(s, [("Desktop app ", False), ("and", True), (" a website", False)])
 box(s, Inches(0.75), Inches(2.4), Inches(5.7), Inches(2.6), "Desktop (double-click)",
     "full powers: form autofill · background auto-search · auto-prepared applications · PDF files", "soft", 20, 15)
@@ -526,10 +781,10 @@ run(p, "Same code, one flag. The app hides what each home can't do — with an e
 
 # ============================== 18 · NUMBERS ==============================
 s = slide("Close the technical story with scale and rigor: parallel preparation, five AI calls per application including the fact-check, and a 21-check automated E2E in both modes.")
-eyebrow(s, "12 · By the numbers")
+eyebrow(s, "16 · By the numbers")
 title(s, [("Small system, ", False), ("real work", True)])
 stats = [
-    ("10", "job sources searched in parallel"),
+    ("10", "job sources searched in one pass"),
     ("109", "verified company boards · 9 countries"),
     ("~15s", "per tailored application (2 in parallel)"),
     ("5", "AI calls per application — incl. fact-check"),
