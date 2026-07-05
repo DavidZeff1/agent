@@ -103,6 +103,7 @@ line by line, and why things were built the way they were.</p>
 <li><a href="#hebrew">Hebrew &amp; two-language support</a></li>
 <li><a href="#autofill">The form-filler robot</a></li>
 <li><a href="#agents">Tools &amp; the agent loop</a></li>
+<li><a href="#plumbing">The AI plumbing: one gate, retries &amp; JSON</a></li>
 <li><a href="#tracker">Memory &amp; autopilot</a></li>
 <li><a href="#deploy">Desktop vs. website (Vercel)</a></li>
 <li><a href="#testing">How we know it works</a></li>
@@ -202,7 +203,7 @@ agent/
 │   ├── profile_store.py    <i>the shape of "you": every profile field + Q&amp;A</i>
 │   ├── tracker.py          <i>remembers every job you've seen and its status</i>
 │   ├── pdfgen.py           <i>turns documents into PDF files using Chrome</i>
-│   ├── llm.py              <i>the one gateway to the AI (pacing, retries, repairs)</i>
+│   ├── llm.py              <i>the one gateway to the AI (pacing, retries, repairs) — Part 13</i>
 │   ├── tools.py + agent.py <i>the "agent" machinery — Part 12</i>
 │   ├── cli.py              <i>the terminal commands</i>
 │   ├── config.py / util.py <i>settings and small helpers</i>
@@ -212,7 +213,7 @@ agent/
 │       ├── catalogs.js     <i>the big option lists behind all the dropdowns</i>
 │       └── style.css       <i>colors, spacing, layout</i>
 ├── presentation/           <i>your class slides + PowerPoint</i>
-├── tests/e2e_test.py       <i>the automated "pretend user" test (Part 15)</i>
+├── tests/e2e_test.py       <i>the automated "pretend user" test (Part 16)</i>
 └── docs/                   <i>this guide</i>
 </div>
 
@@ -324,7 +325,7 @@ the option lists (200 skills, 140 job titles, 129 countries…) live in <code>ca
 <tr><td><code>P</code></td><td>Your whole profile (mirrors <code>profile.json</code>). Editing the form edits <code>P</code>; Save sends it to the server (or to localStorage when hosted).</td></tr>
 <tr><td><code>RESULTS</code></td><td>The current ranked search results shown as cards.</td></tr>
 <tr><td><code>SEEN</code> / <code>APPS_LS</code></td><td>Hosted mode only: your job history and prepared applications, kept in the browser.</td></tr>
-<tr><td><code>STATUS</code></td><td>What the server reported on load: is AI on, how many sources, am I hosted, the build stamp (Part 14).</td></tr>
+<tr><td><code>STATUS</code></td><td>What the server reported on load: is AI on, how many sources, am I hosted, the build stamp (Part 15).</td></tr>
 </table></div>
 
 <h2 id="server">6 · The server (the back end)</h2>
@@ -335,7 +336,7 @@ trigger it. All addresses the page uses:</p>
 
 <div class="tablewrap"><table>
 <tr><th>Address</th><th>What it does</th></tr>
-<tr><td><code>GET /</code></td><td>Serves the page itself (with a version stamp — Part 14).</td></tr>
+<tr><td><code>GET /</code></td><td>Serves the page itself (with a version stamp — Part 15).</td></tr>
 <tr><td><code>GET /api/status</code></td><td>"Who am I talking to?" — profile exists? AI on? tracker counts, settings, build stamp.</td></tr>
 <tr><td><code>GET/POST /api/profile</code></td><td>Read / save your profile.</td></tr>
 <tr><td><code>POST /api/search</code></td><td>Run a search across all sources, rank it, remember new jobs.</td></tr>
@@ -517,6 +518,25 @@ text the AI receives, shortened:</p>
  Return a JSON object with keys: summary, ordered_skills,
  experience_bullets, cover_letter, keywords_used."</span></code></pre>
 
+<h3>The cage of indexes — why it can't invent a job</h3>
+<p>Rules alone aren't enough — models sometimes ignore them. So the prompt adds a structural
+trap: your work history is sent as a <b>numbered list</b>, and the AI must return its bullet
+points keyed by those numbers. A job that isn't in your profile has no number — there is
+literally nowhere to hang invented bullets:</p>
+
+<pre><code>ROLES (index in brackets):
+[<span class="n">0</span>] Bookkeeper at Acme (2021–Present); tech: Excel…
+[<span class="n">1</span>] Data Entry Clerk at Initech (2019–2021); …
+
+<span class="c">← what the AI must send back:</span>
+<span class="s">"experience_bullets": {"0": […], "1": […]}</span></code></pre>
+
+<p>One more dial worth knowing: <b>temperature</b> — how adventurous the AI is allowed to be,
+from 0 (same answer every time) upward. Each role gets its own setting: the Tailor writes at
+<code>0.35</code> (a little freedom of phrasing), the recruiter-Ranker judges at
+<code>0.2</code>, and the Reviewer fact-checks at <code>0.1</code> — nearly deterministic.
+Creativity only where it's safe.</p>
+
 <h3>The critic that keeps it honest</h3>
 <p>LLMs sometimes make things up — confidently. Instead of hoping, the project assumes it will
 happen and checks. The Reviewer gets your profile labeled "the only source of truth" plus the
@@ -536,6 +556,20 @@ databases</em>, and a letter addressed to the wrong company. The Reviewer caught
 problems, the Repairer removed every one, and the re-check came back clean. It also catches
 subtle real cases — like the writer padding "strong communication skills" onto a profile that
 never claimed them.</div>
+
+<h3>If an AI step fails, the packet still ships</h3>
+<p>Every AI call in this chain can fail — the free service can be busy, an answer can arrive
+malformed. Each failure has a planned, harmless landing:</p>
+
+<div class="tablewrap"><table>
+<tr><th>If this fails…</th><th>…this happens instead</th></tr>
+<tr><td>Tailor</td><td>You get the untailored (but complete and truthful) resume straight from your profile.</td></tr>
+<tr><td>Reviewer</td><td>The draft is kept as written — a broken critic must never block the packet.</td></tr>
+<tr><td>Repairer</td><td>The original draft is kept, and the reviewer's findings are saved into <code>answers.json</code> so nothing is hidden.</td></tr>
+</table></div>
+
+<p>That's why "Prepare" never crashes: the AI steps are upgrades stacked on a working non-AI
+baseline — not links in a chain that snaps.</p>
 
 <h3>Code writes the layout, AI writes only words</h3>
 <p>The final documents are assembled by ordinary code from a fixed, single-column template
@@ -624,6 +658,28 @@ require logging in and actively block robots; automating them breaks constantly 
 rules. Greenhouse/Lever forms are public pages — no login, no tricks — which is why the feature
 targets them and honestly says so otherwise.</div>
 
+<h3>Under the robot's hood</h3>
+<p><b>One thread owns the browser.</b> Playwright (the browser-driving library) only accepts
+orders from the thread that started it — so every fill request is placed in a queue, and a
+single worker thread executes them one at a time. The browser itself is a <b>persistent
+profile</b> stored in <code>~/.job_agent/browser/</code>, which is why logins and cookies
+survive between runs.</p>
+
+<p><b>Aggregator links are traced to the real form.</b> A posting found on a job board usually
+links to the board's own page, not the employer's form. The filler downloads that page and
+searches its text for the real address with two patterns:</p>
+
+<pre><code><span class="s">boards.greenhouse.io/…</span>     <span class="c"># also job-boards.… and the eu. variants</span>
+<span class="s">jobs.lever.co/…</span></code></pre>
+
+<p><b>The page is scanned by a tiny script.</b> Before filling, a JavaScript snippet runs inside
+the page, tags every input with a serial number, and reports back each field's label, type,
+choices, and whether it's required — that list is the robot's map of the form.</p>
+
+<p><b>One bad field never stops the rest.</b> Every field is filled inside its own safety net;
+anything that goes wrong just lands that field on the "you review this" list. And the code that
+would click Submit simply does not exist — that is the guarantee.</p>
+
 <h2 id="agents">12 · Tools &amp; the agent loop</h2>
 
 <p>Beyond the buttons, the project has a genuine "AI agent" mode: type
@@ -666,6 +722,41 @@ lets it choose.</p>
 <li><i class="n">5</i>The function's result is added to the conversation, and the loop repeats — now the AI knows what happened and decides its next step.</li>
 </ul>
 
+<h3>The agent's "memory" is just a growing list</h3>
+<p>The AI itself remembers nothing between calls — it is <em>stateless</em>. What creates the
+feeling of an assistant working through a task is the <code>messages</code> list: every request,
+decision and tool result is appended to it, and on each round the AI re-reads the <em>whole</em>
+list and picks the next move. Here is that list at the end of a run:</p>
+
+<pre><code><span class="c">[system]</span>     You are a job-application assistant…
+<span class="c">[user]</span>       <span class="s">"find remote python jobs, show top 3"</span>
+<span class="c">[assistant]</span>  → search_jobs({"keywords": ["python"]})
+<span class="c">[tool]</span>       {"found": 14, "sample": […]}
+<span class="c">[assistant]</span>  → rank_jobs({"top": 3})
+<span class="c">[tool]</span>       {"ranked": 14, "top": […]}
+<span class="c">[assistant]</span>  <span class="s">"Your top 3 matches are: …"</span>   <span class="c">← plain text — loop over</span></code></pre>
+
+<h3>What "run the tool" actually does</h3>
+<p>The AI never executes code. It only writes <em>text</em>: a tool's name plus arguments as
+JSON. <code>dispatch()</code> turns that text into action — parse the arguments, look up the
+tool, call the real Python function, return its result as JSON. And crucially, <b>every possible
+failure goes back to the AI as a message instead of crashing the program</b>:</p>
+
+<pre><code>{"error": "unknown tool 'serch_jobs'"}          <span class="c"># it typo'd the name</span>
+{"error": "arguments were not valid JSON"}      <span class="c"># malformed arguments</span>
+{"error": "bad arguments for search_jobs: …"}   <span class="c"># wrong parameter names</span>
+{"error": "ConnectionError: …"}                 <span class="c"># the tool itself failed</span></code></pre>
+
+<p>The error lands in the conversation like any other result; the AI reads it and fixes its next
+attempt. Errors become feedback.</p>
+
+<h3>Why tool replies are tiny</h3>
+<p>Look at what <code>search_jobs</code> reports back: a count, the cache file's location, and
+eight sample titles — roughly 80 tokens. <em>Not</em> the fourteen full postings, which would be
+~15,000 tokens. The full data is written to <code>jobs_cache.json</code>, and the <em>next</em>
+tool reads it from there. The conversation carries references; the disk carries data. That keeps
+every round fast, keeps the AI focused, and keeps the whole loop inside the free tier's limits.</p>
+
 <p>A real recorded run:</p>
 
 <pre><code>$ agent <span class="s">"find remote python jobs, show top 3, don't apply"</span>
@@ -679,7 +770,48 @@ by this loop — buttons call tools in a fixed order written in code. An AI orch
 cost, delay, and new ways to fail for zero benefit when the right order is already known. The AI
 gets decision power only where judgment is genuinely needed.</div>
 
-<h2 id="tracker">13 · Memory &amp; autopilot</h2>
+<h2 id="plumbing">13 · The AI plumbing: one gate, retries &amp; JSON</h2>
+
+<p>Five different moments consult the AI — ranking, tailoring, reviewing, repairing, answering —
+but none of them talk to Groq directly. Every single call funnels through one file,
+<code>llm.py</code>, which absorbs the three ugly realities of using a free AI service:</p>
+
+<div class="flow">
+  <div class="box plain"><b>Any AI moment</b><span>ranker, tailor, reviewer, repairer, answerer</span></div>
+  <div class="arr">→</div>
+  <div class="box"><b>Throttle</b><span>one shared clock; every call waits its ≥2-second turn</span></div>
+  <div class="arr">→</div>
+  <div class="box plain"><b>Groq</b><span>llama-3.3-70b answers</span></div>
+  <div class="arr">→</div>
+  <div class="box"><b>If refused</b><span>wait and retry — up to 5 times, pauses growing 2s→30s</span></div>
+</div>
+
+<p><b>Reality 1: rate limits.</b> The free tier allows only so many requests (and so many words)
+per minute. So there's a throttle: a single clock, shared by every thread in the program, hands
+out time slots at least two seconds apart. Even when two applications are being prepared at the
+same time, their AI calls politely take turns.</p>
+
+<p><b>Reality 2: refusals.</b> Sometimes the service answers "too busy" (error 429) or hiccups
+(a 5xx error). The gate waits and retries with growing pauses — 2, 4, 8… capped at 30 seconds —
+and when the service says exactly how long to wait (a <code>Retry-After</code> header), that
+wish is honored. Real mistakes, like a badly formed request, are <em>not</em> retried; they
+surface immediately so they can be fixed.</p>
+
+<p><b>Reality 3: JSON.</b> Almost every AI answer in this project must be machine-readable JSON,
+but language models are talkative. Four rungs force the issue:</p>
+
+<div class="stack">
+  <div class="box plain"><b>1 · Ask</b><span>every system prompt ends: "Respond with a single valid JSON object and nothing else."</span></div>
+  <div class="box"><b>2 · Enforce</b><span>Groq's "JSON mode" makes the service itself reject non-JSON output</span></div>
+  <div class="box"><b>3 · Retry</b><span>JSON mode chokes on Hebrew quote marks (ש"ח) — on that specific failure, retry once without it</span></div>
+  <div class="box good"><b>4 · Repair</b><span>find the {…} inside the reply, escape quotes squeezed between Hebrew letters, parse again</span></div>
+</div>
+
+<p>Only if all four rungs fail does the calling step fall back to its non-AI baseline (Part 9).
+This one file is the reason the rest of the project gets to treat a flaky, rate-limited AI
+service as a boring, dependable component.</p>
+
+<h2 id="tracker">14 · Memory &amp; autopilot</h2>
 
 <p><code>tracker.py</code> is forty lines that make the whole thing livable: a dictionary from job
 fingerprint to status, saved as <code>seen.json</code>.</p>
@@ -700,7 +832,7 @@ jobs" and honestly greet you with "no new jobs since last time." Combined with t
 search (Part 6), the daily experience becomes: open the app → a short list of only-new,
 already-ranked jobs → sometimes with applications already prepared and fact-checked, waiting.</p>
 
-<h2 id="deploy">14 · Desktop vs. website (Vercel)</h2>
+<h2 id="deploy">15 · Desktop vs. website (Vercel)</h2>
 
 <p>The same code runs two ways, chosen automatically by one flag (<code>IS_HOSTED</code> in
 <code>config.py</code>, set when Vercel is detected):</p>
@@ -728,7 +860,7 @@ missing pieces instead of dying; and every page carries a <b>build stamp</b> —
 itself with the server and, if outdated, reloads itself once through a cache-proof address.
 Stale pages heal themselves.</div>
 
-<h2 id="testing">15 · How we know it works</h2>
+<h2 id="testing">16 · How we know it works</h2>
 
 <p><code>tests/e2e_test.py</code> is a robot user built on Playwright (a tool that drives a real
 browser). It starts a fresh server with an empty home folder and lives a complete user journey —
@@ -743,7 +875,7 @@ one uncaught error fails the run.</p>
 <pre><code>.venv/bin/python tests/e2e_test.py local
 .venv/bin/python tests/e2e_test.py hosted</code></pre>
 
-<h2 id="extend">16 · Changing things yourself</h2>
+<h2 id="extend">17 · Changing things yourself</h2>
 
 <div class="tablewrap"><table>
 <tr><th>You want to…</th><th>Where to go</th></tr>
@@ -760,7 +892,7 @@ one uncaught error fails the run.</p>
 <code>JOB_AGENT_MODEL</code> (which model), <code>JOB_AGENT_HOME</code> (where data lives),
 <code>JOB_AGENT_MIN_INTERVAL</code> (pause between AI calls).</p>
 
-<h2 id="glossary">17 · Glossary</h2>
+<h2 id="glossary">18 · Glossary</h2>
 
 <div class="tablewrap"><table>
 <tr><td><b>API</b></td><td>An agreed set of web addresses programs use to talk to each other.</td></tr>
@@ -775,7 +907,11 @@ one uncaught error fails the run.</p>
 <tr><td><b>localStorage</b></td><td>A browser's private pocket for a site's data — where the hosted version keeps your profile.</td></tr>
 <tr><td><b>Playwright</b></td><td>A tool that lets a program drive a real browser — powers form-filling and the tests.</td></tr>
 <tr><td><b>Prompt</b></td><td>The written instructions an LLM receives.</td></tr>
+<tr><td><b>Rate limit</b></td><td>How many requests per minute a service accepts — the free AI tier's main constraint, absorbed by the gate in Part 13.</td></tr>
 <tr><td><b>Serverless</b></td><td>Hosting where the program exists only while answering a request (how Vercel runs it).</td></tr>
+<tr><td><b>Stateless</b></td><td>Keeping no memory between calls. The LLM is stateless (the message list is the agent's only memory); so is the hosted server.</td></tr>
+<tr><td><b>Temperature</b></td><td>An LLM dial from predictable (0) to adventurous. The writer runs at 0.35, the fact-checker at 0.1.</td></tr>
+<tr><td><b>Token</b></td><td>The unit AI services count text in — roughly three-quarters of a word. Speed, cost and rate limits are all measured in tokens.</td></tr>
 <tr><td><b>Tool (agent sense)</b></td><td>A function + a description that lets an AI ask for it to be run.</td></tr>
 </table></div>
 
