@@ -197,6 +197,7 @@
     <div id="results-head" hidden class="results-head">
       <h2 id="results-count"></h2>
       <span class="row" style="align-items:center">
+        <label class="check" id="selectall-wrap"><input type="checkbox" id="selectall"> Select all</label>
         <select id="filter" class="slim-select">
           <option value="new">Show: new jobs</option>
           <option value="all">Show: everything</option>
@@ -208,6 +209,7 @@
 
     <div id="selectbar" class="selectbar" hidden>
       <label class="check light"><input type="checkbox" id="tailor" checked> Tailor each resume &amp; letter with AI</label>
+      <span id="tailor-note" class="tiny" hidden></span>
       <button class="btn primary big" id="btn-prepare">Prepare applications</button>
     </div>
   </section>

@@ -18,6 +18,12 @@ let CURRENT_APP = null;
 const STATUS_LABELS = { new: '', skipped: 'skipped', prepared: 'prepared',
                         submitted: 'submitted ✓', interview: 'interview 🎉', rejected: 'rejected' };
 
+// How many of a batch get AI-tailored. Tailoring is three throttled Groq calls per job, so
+// preparing sixty applications with it would take the better part of an hour; the budget goes
+// to the best-scoring jobs and the rest are prepared complete but without per-posting wording.
+// Mirrors generate.DEFAULT_TAILOR_TOP on the server.
+const TAILOR_TOP = 15;
+
 /* ---------------- tiny helpers ---------------- */
 
 /* Hosted mode (Vercel): the server is stateless, so profile / API key / job statuses /
@@ -583,6 +589,13 @@ async function doRerank() {
   }
 }
 
+// The jobs a "select all" may tick: what the filter is showing, minus the ones already
+// handled — their checkbox is hidden, so selecting them would be invisible to the user.
+function selectableResults() {
+  const visible = FILTER === 'new' ? RESULTS.filter(r => r.status === 'new') : RESULTS;
+  return visible.filter(r => !r.status || r.status === 'new' || r.status === 'skipped');
+}
+
 function renderResults() {
   const host = $('#results');
   host.innerHTML = '';
@@ -689,12 +702,28 @@ function updateSelectbar() {
   $('#btn-prepare').textContent = n === 1 ? 'Prepare 1 application' : `Prepare ${n} applications`;
   const tailorLabel = $('#tailor').parentElement;
   tailorLabel.style.display = STATUS.ai ? '' : 'none';
+  // "Select all" reflects the current selection, so ticking every box by hand checks it too.
+  const selectable = selectableResults();
+  $('#selectall-wrap').hidden = selectable.length < 2;
+  $('#selectall').checked = selectable.length > 0 && selectable.every(r => SELECTED.has(r.job.id));
+  // Tailoring is rate-limited, so a big batch spends it on the best matches (see
+  // generate.prepare_batch). Say so, rather than letting 60 jobs look like 60 tailored ones.
+  const note = $('#tailor-note');
+  if (note) {
+    const tailoring = STATUS.ai && $('#tailor').checked;
+    note.hidden = !(tailoring && n > TAILOR_TOP);
+    note.textContent = `— best ${TAILOR_TOP} only; the other ${n - TAILOR_TOP} are prepared `
+      + 'complete, just without AI wording (keeps this to minutes, not hours)';
+  }
 }
 
 async function doPrepare() {
-  const ids = [...SELECTED];
+  // Walk RESULTS rather than SELECTED so the batch runs best-match-first: that decides which
+  // jobs get the limited tailoring budget, and it means an interrupted run has already done
+  // the ones that matter most.
+  const ids = RESULTS.filter(r => SELECTED.has(r.job.id)).map(r => r.job.id);
   if (!ids.length) return;
-  const tailor = STATUS.ai && $('#tailor').checked;
+  const tailorAll = STATUS.ai && $('#tailor').checked;
   const dlg = $('#progress');
   dlg.showModal();
   // Poll the server's one-line status so the user sees what the AI is doing right now.
@@ -710,13 +739,17 @@ async function doPrepare() {
   // free tier's tokens-per-minute budget (more workers just trade speed for rate-limit waits).
   const workers = Math.min(2, ids.length);
   $('#progress-title').textContent = `Preparing ${ids.length} application${ids.length > 1 ? 's' : ''}`;
-  $('#progress-text').textContent = workers > 1 ? `Working on ${workers} at a time…` : '';
+  $('#progress-text').textContent =
+    tailorAll && ids.length > TAILOR_TOP ? `Tailoring the best ${TAILOR_TOP}, then preparing the rest quickly…`
+    : workers > 1 ? `Working on ${workers} at a time…` : '';
   const worker = async () => {
     while (next < ids.length) {
-      const id = ids[next++];
+      const rank = next++;
+      const id = ids[rank];
       const r = RESULTS.find(x => x.job.id === id);
       try {
-        const body = { job_id: id, tailor };
+        const body = { job_id: id, tailor: tailorAll && rank < TAILOR_TOP,
+                       pdf: rank < TAILOR_TOP };
         if (HOSTED()) { body.job = r.job; body.profile = P; body.inline = true; }
         const resp = await api('apply', { body });
         if (HOSTED() && resp.packet) {
@@ -1215,6 +1248,15 @@ async function initInner() {
   wire('#btn-rerank', 'click', doRerank);
   wire('#btn-prepare', 'click', doPrepare);
   wire('#filter', 'change', () => { FILTER = $('#filter').value; renderResults(); });
+  wire('#tailor', 'change', updateSelectbar);  // keep the "best N only" note honest
+  wire('#selectall', 'change', () => {
+    // Only the jobs actually on screen — selecting behind the filter would prepare
+    // applications the user can't see.
+    for (const r of selectableResults()) {
+      $('#selectall').checked ? SELECTED.add(r.job.id) : SELECTED.delete(r.job.id);
+    }
+    renderResults();
+  });
 
   // application detail
   wire('#btn-autofill', 'click', doAutofill);

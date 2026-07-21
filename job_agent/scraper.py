@@ -688,6 +688,39 @@ SOURCES = {
 }
 
 
+# Ready-made keyword families, for "show me everything in this field" rather than one title.
+# Terms are OR'd and matched as substrings anywhere in a posting (see ``_term_in``), so a
+# single word goes a long way: "data" alone already catches database, dataset, big data and
+# every "Data <something>" title. The rest of a family exists to reach the roles that do the
+# same work without the obvious word in their title — a "BI Developer" or a "Reporting
+# Specialist" would never be found by searching "data".
+#
+# Recall is deliberately favoured over precision here: a wide net feeds :mod:`job_agent.matching`,
+# which scores every hit against the profile, and bulk preparation applies a minimum score. Bare
+# "analyst" is the loosest term in the data family (it also lands Financial and QA Analyst
+# postings) and is the first thing to drop if results look too noisy.
+PRESETS = {
+    "data": [
+        "data",                     # database, dataset, big data, Data Analyst/Engineer/Scientist
+        "analytics", "analyst",     # Marketing Analytics, Business Analyst, BI Analyst
+        "business intelligence", "power bi", "tableau", "looker",
+        "sql", "etl", "dashboard", "reporting",
+        "data warehouse", "machine learning",
+        # "BI" can't be a term of its own — substring matching would fire on ambitious,
+        # mobile, combine — so the common BI titles are spelled out instead.
+        "bi developer", "bi analyst", "bi engineer", "bi consultant",
+    ],
+}
+
+
+def preset_terms(name: str) -> List[str]:
+    """Return the keyword family called ``name``. Raises ``KeyError`` with the valid names."""
+    try:
+        return list(PRESETS[name.strip().lower()])
+    except KeyError:
+        raise KeyError(f"unknown preset {name!r}; available: {', '.join(sorted(PRESETS))}") from None
+
+
 # ----------------------------------------------------------------------------
 # Aggregation, filtering, dedup
 # ----------------------------------------------------------------------------

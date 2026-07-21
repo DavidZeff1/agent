@@ -564,11 +564,17 @@ def _why_fit(profile: Profile, job: Job, tailoring: Optional[dict]) -> str:
 # ----------------------------------------------------------------------------
 
 
-def generate_application(profile: Profile, job: Job, out_dir, llm=None, progress=None) -> dict:
+def generate_application(profile: Profile, job: Job, out_dir, llm=None, progress=None,
+                         pdf: bool = True) -> dict:
     """Generate all artifacts for one job into ``out_dir/<company>__<title>/`` and return paths.
 
     ``progress`` is an optional ``callable(str)`` that receives a short human-readable note
     at each phase (used by the web UI to show what's happening during slow steps).
+
+    ``pdf=False`` skips the two headless-browser renders. Each one launches Chrome with a
+    throwaway profile and waits on it, which costs tens of seconds — negligible for a single
+    application, but the dominant cost of a large batch (see :func:`prepare_batch`). The
+    Markdown and plain-text resumes are written either way, so the packet is never incomplete.
     """
     import os
 
@@ -616,15 +622,16 @@ def generate_application(profile: Profile, job: Job, out_dir, llm=None, progress
     }
 
     # PDF copies (forms want file uploads); best-effort via the locally installed browser.
-    from . import pdfgen
+    if pdf:
+        from . import pdfgen
 
-    note("Creating the PDF files…")
-    resume_pdf = os.path.join(folder, "resume.pdf")
-    if pdfgen.html_to_pdf(render_resume_html(profile, tailoring), resume_pdf):
-        paths["resume_pdf"] = resume_pdf
-    letter_pdf = os.path.join(folder, "cover_letter.pdf")
-    if pdfgen.html_to_pdf(render_letter_html(profile, cover), letter_pdf):
-        paths["cover_letter_pdf"] = letter_pdf
+        note("Creating the PDF files…")
+        resume_pdf = os.path.join(folder, "resume.pdf")
+        if pdfgen.html_to_pdf(render_resume_html(profile, tailoring), resume_pdf):
+            paths["resume_pdf"] = resume_pdf
+        letter_pdf = os.path.join(folder, "cover_letter.pdf")
+        if pdfgen.html_to_pdf(render_letter_html(profile, cover), letter_pdf):
+            paths["cover_letter_pdf"] = letter_pdf
     note("Saving the application packet…")
     answers = {
         "job": {"id": job.id, "title": job.title, "company": job.company,
@@ -651,3 +658,85 @@ def generate_application(profile: Profile, job: Job, out_dir, llm=None, progress
         "form_md": packet,
     }
     return paths
+
+
+# ----------------------------------------------------------------------------
+# Bulk preparation
+# ----------------------------------------------------------------------------
+
+
+DEFAULT_TAILOR_TOP = 15
+
+
+def prepare_batch(profile: Profile, ranked: List[dict], out_dir, llm=None,
+                  tailor_top: int = DEFAULT_TAILOR_TOP, limit: int = 0, min_score: float = 0.0,
+                  skip_ids=(), progress=None, on_ready=None, pdf_top: Optional[int] = None) -> dict:
+    """Prepare a packet for many ranked jobs at once, spending the expensive work on the best.
+
+    A large batch has two costs that scale badly, and both are handled the same way — give the
+    budget to the top of the ranking and let the tail be cheap:
+
+    * **Tailoring** is three Groq calls per job (write, fact-check, repair) against a free tier
+      throttled to one call every couple of seconds, so a hundred tailored jobs runs the better
+      part of an hour. Only the best-scoring ``tailor_top`` are tailored.
+    * **PDFs** launch a headless browser twice per job and wait on it — tens of seconds each,
+      and in a big batch this costs more than the LLM does. Only the best ``pdf_top``
+      (default: the same jobs that got tailored) get them. Every packet still contains the
+      Markdown and plain-text resume, the cover letter, and the filled form answers.
+
+    Pass ``tailor_top``/``pdf_top`` of 0 for none, or a number at least as large as ``ranked``
+    for all of them.
+
+    ``ranked`` is :func:`job_agent.matching.rank_jobs` output — already sorted, best first.
+    ``limit`` (0 = no cap) bounds how many packets to produce, ``min_score`` drops weak matches,
+    and ``skip_ids`` skips jobs already prepared. ``on_ready(entry, paths)`` is called after each
+    success so callers can record status as they go.
+
+    One job that fails to generate is recorded in ``failed`` and the batch continues: a single
+    bad posting must never cost the user the other ninety-nine.
+    """
+    import os
+
+    summary: dict = {"prepared": [], "tailored": 0, "untailored": 0, "failed": [], "skipped": 0}
+    skip = set(skip_ids)
+    if pdf_top is None:
+        pdf_top = tailor_top
+    for entry in ranked:
+        if limit and len(summary["prepared"]) >= limit:
+            break
+        job_dict = entry.get("job") or {}
+        if job_dict.get("id") in skip:
+            summary["skipped"] += 1
+            continue
+        if min_score and entry.get("final_score", 0) < min_score:
+            break  # ranked is sorted, so nothing further down can qualify either
+        label = f"{job_dict.get('title') or '?'} @ {job_dict.get('company') or '?'}"
+        # The split is by rank, not by arrival: the Nth-best job gets the tailoring budget
+        # even if earlier ones were skipped as already-prepared.
+        want_tailor = llm is not None and len(summary["prepared"]) < tailor_top
+        want_pdf = len(summary["prepared"]) < pdf_top
+        if progress:
+            progress(f"{len(summary['prepared']) + 1}. {label}"
+                     + (" — tailoring…" if want_tailor else ""))
+        # Job.from_dict is inside the try on purpose: a malformed posting from a board (a
+        # missing field is enough to raise) must be recorded and stepped over like any other
+        # failure, not abort the whole batch before it starts.
+        try:
+            job = Job.from_dict(job_dict)
+            paths = generate_application(profile, job, out_dir, pdf=want_pdf,
+                                         llm=llm if want_tailor else None)
+        except Exception as e:  # noqa: BLE001 - one bad posting must not end the batch
+            summary["failed"].append({"id": job_dict.get("id", ""), "job": label,
+                                      "error": f"{type(e).__name__}: {e}"})
+            continue
+        summary["prepared"].append({
+            "id": job.id,
+            "job": f"{job.title} @ {job.company}",
+            "score": round(entry.get("final_score", 0)),
+            "tailored": bool(paths["tailored"]),
+            "dir": os.path.basename(paths["dir"]),
+        })
+        summary["tailored" if paths["tailored"] else "untailored"] += 1
+        if on_ready:
+            on_ready(entry, paths)
+    return summary

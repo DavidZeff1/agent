@@ -59,7 +59,11 @@ APP_SETTINGS_DEFAULTS = {
     "autosearch": True,           # check the boards on a schedule while the app runs
     "autosearch_hours": 6,
     "auto_prepare_min_score": 0,  # 0 = off
-    "auto_prepare_max": 3,
+    "auto_prepare_max": 25,       # packets per pass; only applies once auto-prepare is on
+    # Of those, how many get AI-tailored. Tailoring is 3 Groq calls per job against a
+    # throttled free tier, so the budget goes to the best-scoring few and the rest are
+    # prepared untailored-but-complete. See generate.prepare_batch.
+    "auto_prepare_tailor_top": 10,
     "jooble_key": "",             # free key -> jooble.org (aggregator, ~69 countries)
     "adzuna_app_id": "",          # free keys -> developer.adzuna.com (20 countries)
     "adzuna_app_key": "",

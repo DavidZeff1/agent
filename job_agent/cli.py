@@ -15,7 +15,7 @@ from . import profile_store as ps
 from .config import get_settings
 from .llm import get_llm
 from .profile_store import Profile
-from .scraper import SOURCES, Job
+from .scraper import PRESETS, SOURCES, Job, preset_terms
 from .tools import Context
 
 # ----------------------------------------------------------------------------
@@ -82,9 +82,9 @@ def cmd_answer(args) -> None:
 
 def cmd_search(args) -> None:
     profile = ps.load_profile()
-    keywords = _split(args.keywords) if args.keywords else ps.default_keywords(profile)
+    keywords = _keywords_for(args, profile)
     if not keywords:
-        print("Provide --keywords, or set desired titles/skills via setup.")
+        print("Provide --keywords or --preset, or set desired titles/skills via setup.")
         sys.exit(1)
     print(f"Searching for {keywords} (location={args.location or 'any'}, remote={args.remote}) ...")
     ctx = _context(profile, want_llm=False)
@@ -152,28 +152,27 @@ def cmd_apply(args) -> None:
         print("No jobs to apply to. Run `review` to select, or pass --ids / --all.")
         sys.exit(1)
 
-    if want_llm and ctx.llm is None:
-        print("[note] No GROQ_API_KEY — generating untailored resumes + fully pre-filled forms from stored data.")
-
-    ctx.settings.ensure_home()
     for jid in ids:
         if jid not in by_id:
             print(f"  [skip] unknown job id {jid}")
-            continue
-        job = Job.from_dict(by_id[jid])
-        print(f"Generating application: {job.title} @ {job.company} ...")
-        paths = gen.generate_application(profile, job, ctx.settings.applications_dir, llm=ctx.llm)
-        tag = "tailored" if paths["tailored"] else "untailored"
-        print(f"  [{tag}] -> {paths['dir']}")
-    print("\nReview each folder, then submit via the posting URL in job.md / application_form.md.")
+    # Keep ranked order so --tailor-top spends the tailoring budget on the best matches.
+    score_by_id = {e["job"]["id"]: e.get("final_score", 0) for e in ranked}
+    wanted = set(ids)
+    entries = [{"job": by_id[jid], "final_score": score_by_id.get(jid, 0)}
+               for jid in (e["job"]["id"] for e in ranked) if jid in wanted]
+    entries += [{"job": by_id[jid], "final_score": 0}
+                for jid in ids if jid in by_id and jid not in score_by_id]
+
+    print(f"Generating {len(entries)} application(s) ...")
+    _prepare_and_report(profile, entries, ctx, tailor_top=args.tailor_top)
 
 
 def cmd_run(args) -> None:
     """End-to-end: search -> match -> review -> apply."""
     profile = _require_profile()
-    keywords = _split(args.keywords) if args.keywords else ps.default_keywords(profile)
+    keywords = _keywords_for(args, profile)
     if not keywords:
-        print("No keywords and no desired titles/skills in profile. Add some via setup.")
+        print("No keywords and no desired titles/skills in profile. Add some via setup, or pass --preset.")
         sys.exit(1)
     location = args.location or (profile.preferences.desired_locations[0] if profile.preferences.desired_locations else "")
     ctx = _context(profile, want_llm=not args.no_llm)
@@ -190,22 +189,23 @@ def cmd_run(args) -> None:
     ctx.save_ranked(ranked)
     _print_ranked(ranked, args.top)
 
-    print("[3/4] Select jobs to apply to.")
-    ids = _prompt_selection(ranked, args.top)
-    if not ids:
-        print("No selection; stopping before apply.")
+    if args.all:
+        entries = [e for e in ranked if e.get("final_score", 0) >= args.min_score]
+        print(f"[3/4] Applying to all {len(entries)} match(es)"
+              + (f" scoring {args.min_score}+" if args.min_score else "") + ".")
+    else:
+        print("[3/4] Select jobs to apply to.")
+        ids = set(_prompt_selection(ranked, args.top))
+        if not ids:
+            print("No selection; stopping before apply.")
+            return
+        entries = [e for e in ranked if e["job"]["id"] in ids]
+    if not entries:
+        print(f"Nothing scored {args.min_score} or above. Lower --min-score to widen the batch.")
         return
 
     print("[4/4] Generating applications ...")
-    for jid in ids:
-        entry = next((e for e in ranked if e["job"]["id"] == jid), None)
-        if not entry:
-            continue
-        job = Job.from_dict(entry["job"])
-        paths = gen.generate_application(profile, job, ctx.settings.applications_dir, llm=ctx.llm)
-        tag = "tailored" if paths["tailored"] else "untailored"
-        print(f"  [{tag}] {job.title} @ {job.company} -> {paths['dir']}")
-    print("\nDone. Open each folder, review, and submit through the posting URL.")
+    _prepare_and_report(profile, entries, ctx, tailor_top=args.tailor_top)
 
 
 def cmd_web(args) -> None:
@@ -238,6 +238,43 @@ def cmd_agent(args) -> None:
 
 def _split(s: Optional[str]) -> List[str]:
     return [x.strip() for x in (s or "").split(",") if x.strip()]
+
+
+def _keywords_for(args, profile: Optional[Profile]) -> List[str]:
+    """Search terms for this run: an explicit preset, then --keywords, then the profile."""
+    preset = getattr(args, "preset", None)
+    if preset:
+        try:
+            return preset_terms(preset)
+        except KeyError as e:
+            print(e.args[0])
+            sys.exit(1)
+    if args.keywords:
+        return _split(args.keywords)
+    return ps.default_keywords(profile)
+
+
+def _prepare_and_report(profile: Profile, entries: List[dict], ctx: Context,
+                        tailor_top: int, min_score: float = 0.0) -> None:
+    """Generate packets for ``entries`` and print a line per job plus a closing summary."""
+    ctx.settings.ensure_home()
+    if ctx.llm is None:
+        print("[note] No GROQ_API_KEY — generating untailored resumes + fully pre-filled forms from stored data.")
+    elif tailor_top < len(entries):
+        print(f"      AI-tailoring the top {tailor_top}; the rest are prepared untailored "
+              f"(tailoring is rate-limited — raise with --tailor-top).")
+
+    batch = gen.prepare_batch(profile, entries, ctx.settings.applications_dir, llm=ctx.llm,
+                              tailor_top=tailor_top, min_score=min_score,
+                              progress=lambda note: print(f"  {note}"))
+    for item in batch["prepared"]:
+        print(f"  [{'tailored' if item['tailored'] else 'untailored'}] {item['job']} -> {item['dir']}")
+    for bad in batch["failed"]:
+        print(f"  [failed] {bad['job']}: {bad['error']}")
+    print(f"\n{len(batch['prepared'])} application(s) ready in {ctx.settings.applications_dir} "
+          f"({batch['tailored']} tailored, {batch['untailored']} untailored"
+          + (f", {len(batch['failed'])} failed" if batch["failed"] else "") + ").")
+    print("Open each folder, review, and submit through the posting URL in job.md.")
 
 
 def _search(ctx: Context, keywords, location, remote, limit) -> List[Job]:
@@ -318,6 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("search", help="Search job boards and cache results.")
     sp.add_argument("--keywords", help="Comma-separated keywords (defaults to your desired titles).")
+    sp.add_argument("--preset", help="Search a whole field instead of one title: " + ", ".join(sorted(PRESETS)))
     sp.add_argument("--location", default="", help="Target location (default: any).")
     sp.add_argument("--remote", action=argparse.BooleanOptionalAction, default=True, help="Prefer remote roles.")
     sp.add_argument("--limit", type=int, default=30)
@@ -337,13 +375,24 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--ids", help="Comma-separated job ids (overrides saved selection).")
     sp.add_argument("--all", action="store_true", help="Apply to every ranked job.")
     sp.add_argument("--no-llm", action="store_true", help="Skip LLM tailoring (still fills forms from data).")
+    sp.add_argument("--tailor-top", type=int, default=gen.DEFAULT_TAILOR_TOP, metavar="N",
+                    help=f"AI-tailor only the N best-scoring jobs (default {gen.DEFAULT_TAILOR_TOP}); "
+                         "the rest are prepared untailored. Use a big number to tailor everything.")
     sp.set_defaults(func=cmd_apply)
 
     sp = sub.add_parser("run", help="End-to-end: search -> match -> review -> apply.")
     sp.add_argument("--keywords", help="Comma-separated keywords (defaults to your desired titles).")
+    sp.add_argument("--preset", help="Apply across a whole field instead of one title: " + ", ".join(sorted(PRESETS)))
     sp.add_argument("--location", default="")
-    sp.add_argument("--limit", type=int, default=30)
+    sp.add_argument("--limit", type=int, default=30, help="Max jobs to find (raise it for bulk runs).")
     sp.add_argument("--top", type=int, default=15)
+    sp.add_argument("--all", action="store_true",
+                    help="Skip the selection prompt and prepare an application for every match.")
+    sp.add_argument("--min-score", type=float, default=0.0, metavar="N",
+                    help="With --all, only prepare jobs scoring N or above (0 = every match).")
+    sp.add_argument("--tailor-top", type=int, default=gen.DEFAULT_TAILOR_TOP, metavar="N",
+                    help=f"AI-tailor only the N best-scoring jobs (default {gen.DEFAULT_TAILOR_TOP}); "
+                         "the rest are prepared untailored. Use a big number to tailor everything.")
     sp.add_argument("--no-llm", action="store_true", help="Deterministic scoring + untailored resumes.")
     sp.set_defaults(func=cmd_run)
 

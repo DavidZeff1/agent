@@ -178,6 +178,38 @@ python -m job_agent agent "find remote python jobs and draft applications for th
 
 (You can also use `python run.py <command>` instead of `python -m job_agent <command>`.)
 
+### Applying broadly: presets and bulk preparation
+
+To go after a whole field rather than one job title, use a **preset** — a family of search
+terms that reaches the roles a single keyword misses:
+
+```bash
+# Every data-ish job the boards have, one application packet each
+python -m job_agent run --preset data --limit 200 --all
+```
+
+`--preset data` searches for `data, analytics, analyst, business intelligence, power bi,
+tableau, looker, sql, etl, dashboard, reporting, data warehouse, machine learning` and the
+common `BI <role>` titles. Terms match as substrings anywhere in a posting, so `data` alone
+already covers *database*, *dataset*, *big data* and every *Data Something* title; the rest of
+the family is there to find the "BI Developer" and "Reporting Specialist" roles that do the
+same work without the word in their title. `--all` skips the selection prompt and prepares
+one packet per match; `--min-score N` drops the weak ones.
+
+In the web app the same thing is **Select all** above the results, then *Prepare applications*.
+
+**A big batch spends its expensive work on the best matches**, because two costs scale badly:
+
+| Cost | Why it hurts | What happens |
+|---|---|---|
+| AI tailoring | 3 Groq calls per job, throttled — 100 jobs ≈ an hour | Only the top `--tailor-top` (default 15) are tailored |
+| PDF rendering | Launches a headless browser twice per job | Only those same top matches get PDFs |
+
+Everything below the cutoff still gets a complete packet — resume (`.md`/`.txt`), cover letter,
+and the filled-in `application_form.md` — just without per-posting wording. Raise the cutoff
+with `--tailor-top 100` if you'd rather wait; drop it with `--tailor-top 0` for maximum speed.
+Preparing 200 untailored packets takes seconds.
+
 ### Answer any application question from your stored data
 
 ```bash
@@ -196,11 +228,11 @@ Confident answers are cached back into your profile so it grows richer over time
 | `setup [--import PATH] [--force]` | Interactive profile entry, or import an existing profile JSON |
 | `show` | Print your stored profile |
 | `answer "<question>"` | Answer an arbitrary application question from stored data |
-| `search [--keywords ...] [--location ...] [--remote/--no-remote] [--limit N] [--sources ...]` | Search boards, cache results |
+| `search [--keywords ...] [--preset data] [--location ...] [--remote/--no-remote] [--limit N] [--sources ...]` | Search boards, cache results |
 | `match [--llm] [--top N]` | Rank cached jobs; `--llm` re-ranks the top matches |
 | `review [--top N]` | Show ranking, select jobs to apply to |
-| `apply [--ids a,b] [--all] [--no-llm]` | Generate applications for selected jobs |
-| `run [--keywords ...] [--no-llm] ...` | Full pipeline in one command |
+| `apply [--ids a,b] [--all] [--tailor-top N] [--no-llm]` | Generate applications for selected jobs |
+| `run [--keywords ...] [--preset data] [--all] [--min-score N] [--tailor-top N] [--no-llm] ...` | Full pipeline in one command; `--all` prepares every match |
 | `agent "<request>"` | Natural-language agent using Groq tool-calling |
 | `web [--port N] [--open]` | Start the local web app (what `Job Agent.command` runs) |
 

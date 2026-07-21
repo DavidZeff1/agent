@@ -115,7 +115,7 @@ def run_auto_search() -> dict:
     """One scheduled pass: search -> rank -> record new -> optionally auto-prepare top new jobs."""
     cfg = load_app_settings()
     profile = ps.load_profile()
-    summary = {"ran_at": int(time.time()), "found": 0, "new": 0, "prepared": 0, "error": ""}
+    summary = {"ran_at": int(time.time()), "found": 0, "new": 0, "prepared": 0, "tailored": 0, "error": ""}
     if not profile or not (profile.full_name or profile.skills):
         summary["error"] = "no profile yet"
         return summary
@@ -137,20 +137,23 @@ def run_auto_search() -> dict:
         min_score = int(cfg["auto_prepare_min_score"] or 0)
         if min_score > 0:
             seen = tracker.load()
-            prepared = 0
-            for e in ranked:
-                if prepared >= int(cfg["auto_prepare_max"]):
-                    break
-                j = e["job"]
-                if e["final_score"] < min_score:
-                    break  # ranked is sorted; nothing below will qualify
-                if seen.get(j["id"], {}).get("status", "new") != "new":
-                    continue
-                ctx.settings.ensure_home()
-                gen.generate_application(profile, Job.from_dict(j), ctx.settings.applications_dir, llm=ctx.llm)
-                tracker.set_status(j["id"], "prepared", title=j["title"], company=j["company"], url=j.get("url", ""))
-                prepared += 1
-            summary["prepared"] = prepared
+            ctx.settings.ensure_home()
+
+            def _mark_prepared(entry, _paths):
+                j = entry["job"]
+                tracker.set_status(j["id"], "prepared", title=j["title"], company=j["company"],
+                                   url=j.get("url", ""))
+
+            batch = gen.prepare_batch(
+                profile, ranked, ctx.settings.applications_dir, llm=ctx.llm,
+                tailor_top=int(cfg["auto_prepare_tailor_top"]),
+                limit=int(cfg["auto_prepare_max"]),
+                min_score=min_score,
+                skip_ids=[jid for jid, e in seen.items() if e.get("status", "new") != "new"],
+                on_ready=_mark_prepared,
+            )
+            summary["prepared"] = len(batch["prepared"])
+            summary["tailored"] = batch["tailored"]
     except Exception as e:  # noqa: BLE001 - a failed pass must not kill the scheduler
         summary["error"] = str(e)
     get_settings().ensure_home()
@@ -436,7 +439,9 @@ def create_app() -> Flask:
             keywords = ps.default_keywords(c.profile)
         if not keywords:
             return jsonify({"error": "Type what you're looking for, or add desired job titles to your profile."}), 400
-        limit = max(1, min(int(data.get("limit", 30) or 30), 100))
+        # Bulk preparation wants a deep result list, so the ceiling is generous. Boards return
+        # far fewer than this for a narrow query; a broad preset is what actually fills it.
+        limit = max(1, min(int(data.get("limit", 30) or 30), 300))
         jobs = scraper.search_jobs(
             keywords,
             location=str(data.get("location", "")).strip(),
@@ -480,6 +485,9 @@ def create_app() -> Flask:
         data = request.get_json(force=True, silent=True) or {}
         job_id = str(data.get("job_id", ""))
         want_tailor = bool(data.get("tailor", True))
+        # PDFs cost two headless-browser launches, so a bulk run asks for them only on its
+        # best matches — same budget as tailoring. The .md/.txt resume is always written.
+        want_pdf = bool(data.get("pdf", True))
         profile = _profile_from(data)
         if isinstance(data.get("job"), dict):  # hosted mode: the browser holds the job
             job = Job.from_dict(data["job"])
@@ -499,7 +507,7 @@ def create_app() -> Flask:
         scratch = tempfile.mkdtemp(prefix="ja-apply-") if IS_HOSTED else None
         out_dir = scratch or get_settings().ensure_home().applications_dir
         try:
-            paths = gen.generate_application(profile, job, out_dir,
+            paths = gen.generate_application(profile, job, out_dir, pdf=want_pdf,
                                              llm=_req_llm() if want_tailor else None,
                                              progress=_set_progress)
             resp = {
