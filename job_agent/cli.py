@@ -9,15 +9,14 @@ import argparse
 import sys
 from typing import List, Optional
 
-from . import matching
 from . import generate as gen
+from . import matching
 from . import profile_store as ps
 from .config import get_settings
-from .llm import get_llm, llm_available
+from .llm import get_llm
 from .profile_store import Profile
 from .scraper import SOURCES, Job
 from .tools import Context
-
 
 # ----------------------------------------------------------------------------
 # helpers

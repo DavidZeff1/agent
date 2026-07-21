@@ -1,4 +1,6 @@
-# Minimal dependencies.
+# Kept because Vercel's Python runtime installs from this file. pyproject.toml is the
+# source of truth for everything else (`pip install .`, or `.[autofill]` / `.[dev]`);
+# these three must stay in sync with its [project] dependencies.
 groq>=0.11.0        # Groq LLM client (OpenAI-compatible chat + tool-calling)
 requests>=2.28.0    # HTTP for job-board APIs (bundles certifi -> works around macOS CA issues)
 flask>=3.0.0        # Web app (python -m job_agent web / Vercel)

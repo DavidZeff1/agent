@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+
+  install:
+    # pyproject claims requires-python >=3.9. Nothing has ever proved that, so prove it here:
+    # install the built package on each supported version and start the app from outside the
+    # source tree, which also catches static/ failing to ship as package data.
+    name: install & import (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install .
+      - name: Build the Flask app and import every module
+        working-directory: /tmp
+        run: |
+          python - <<'PY'
+          from job_agent.web import create_app
+          create_app()
+          import job_agent.agent, job_agent.autofill, job_agent.cli, job_agent.company_directory
+          import job_agent.generate, job_agent.github_import, job_agent.matching, job_agent.pdfgen
+          import job_agent.profile_store, job_agent.scraper, job_agent.tools, job_agent.tracker
+          print("app builds and all modules import")
+          PY
+
+  hosted-isolation:
+    # Hosted mode is multi-tenant: one warm instance serves unrelated visitors. Assert that the
+    # endpoints backed by machine-wide state stay closed there, so the guards can't silently
+    # regress into leaking one visitor's profile or resume to the next.
+    name: hosted isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - env:
+          VERCEL: "1"
+          JOB_AGENT_HOME: /tmp/ci-home
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          os.makedirs("/tmp/ci-home/applications/acme__eng", exist_ok=True)
+          json.dump({"full_name": "Prior Visitor", "skills": ["Excel"]},
+                    open("/tmp/ci-home/profile.json", "w"))
+          json.dump({"job": {"id": "j1", "title": "Eng", "company": "Acme"}},
+                    open("/tmp/ci-home/applications/acme__eng/answers.json", "w"))
+          json.dump({"jooble_key": "SECRET"}, open("/tmp/ci-home/settings.json", "w"))
+
+          from job_agent.web import create_app
+          client = create_app().test_client()
+          closed = ["/api/results", "/api/settings", "/api/applications",
+                    "/api/application/acme__eng", "/api/application/acme__eng/file/resume.md"]
+          bad = [p for p in closed if client.get(p).status_code != 404]
+          bad += [p for p in ("/api/profile", "/api/settings", "/api/track")
+                  if any(s in client.post(p, json={"full_name": "X"}).get_data(as_text=True)
+                         for s in ("Prior Visitor", "SECRET"))]
+          for path in ("/api/status", "/api/profile"):
+              body = client.get(path).get_data(as_text=True)
+              if "Prior Visitor" in body or "SECRET" in body:
+                  bad.append(path + " (leaked)")
+          if json.load(open("/tmp/ci-home/profile.json"))["full_name"] != "Prior Visitor":
+              bad.append("POST /api/profile wrote to shared disk")
+          print("FAILED:", bad) if bad else print("hosted mode reads and writes nothing shared")
+          sys.exit(1 if bad else 0)
+          PY

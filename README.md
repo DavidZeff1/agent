@@ -50,6 +50,14 @@ autofill and background auto-search need the desktop version, and PDFs become a
 "Print / save as PDF" button. Don't set `GROQ_API_KEY` as a Vercel env var unless you're
 happy for every visitor to spend your quota — without it, each visitor uses their own key.
 
+That statelessness is enforced on the server, not just observed by the UI. One warm serverless
+instance serves unrelated visitors in turn, so anything written to its disk would be readable
+by whoever lands on it next. Hosted, the endpoints backed by machine-wide state (`/api/profile`
+POST, `/api/applications`, `/api/application/…`, `/api/results`, `/api/settings`, `/api/track`)
+return 404, `/api/status` reports nothing about the stored profile, and a prepared application
+is generated into a throwaway directory, returned inline, and deleted before the response is
+sent. The `hosted isolation` CI job asserts all of this on every push.
+
 ---
 
 ## Why this design (read this first)
@@ -118,10 +126,12 @@ happy for every visitor to spend your quota — without it, each visitor uses th
 ```bash
 cd agent
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt        # groq + requests
+pip install .                          # or: pip install -r requirements.txt
 ```
 
-Requires Python 3.9+ (developed on 3.14).
+Requires Python 3.9+ (developed on 3.14); CI installs and starts the app on 3.9, 3.12 and 3.13.
+Optional extras: `pip install '.[autofill]'` adds Playwright for desktop form-filling, and
+`pip install '.[dev]'` adds ruff (`ruff check .` — CI runs the same command).
 
 ### Set your Groq API key (optional but recommended)
 

@@ -3,6 +3,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.DS_Store
+build/
+dist/
+*.egg-info/
+.ruff_cache/
 # local runtime state (also lives in ~/.job_agent by default)
 .job_agent/
 profile.json
@@ -10,3 +15,6 @@ jobs_cache.json
 ranked.json
 selection.json
 applications/
+
+# Presentation decks live alongside the repo, not in it
+*.pptx

@@ -24,9 +24,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from . import matching, scraper
 from . import generate as gen
-from . import profile_store
+from . import matching, profile_store, scraper
 from .config import get_settings
 from .profile_store import Profile
 from .scraper import Job

@@ -6,12 +6,12 @@ Hosted = Vercel simulation (VERCEL=1, no env key; browser localStorage; key via 
 """
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
 import time
 
-import pathlib
 AGENT = str(pathlib.Path(__file__).resolve().parents[1])
 SCRATCH = "/tmp"
 MODE = sys.argv[1] if len(sys.argv) > 1 else "local"

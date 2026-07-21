@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "job-agent"
+version = "1.0.0"
+description = "A personal job-search assistant: finds postings, ranks them against your profile, and prepares tailored applications."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "groq>=0.11.0",     # Groq LLM client (OpenAI-compatible chat + tool-calling)
+    "requests>=2.28.0", # HTTP for job-board APIs (bundles certifi -> works around macOS CA issues)
+    "flask>=3.0.0",     # Web app (python -m job_agent web / Vercel)
+]
+
+[project.optional-dependencies]
+# Desktop-only form autofill. Deliberately not a hard dependency: serverless deploys stay
+# small, and everything except the autofill button works without it.
+autofill = ["playwright>=1.40"]
+dev = ["ruff>=0.6"]
+
+[project.scripts]
+job-agent = "job_agent.cli:main"
+
+[tool.setuptools]
+packages = ["job_agent"]
+
+[tool.setuptools.package-data]
+job_agent = ["static/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+# Pyflakes + the pycodestyle errors worth enforcing, plus import hygiene and bugbear.
+# E501 (line length) is deliberately left off: `line-length` above guides the formatter
+# without turning the existing long-but-readable lines into CI failures.
+# `UP` (pyupgrade) is deliberately absent: it would rewrite every typing.List/Optional in the
+# package for style alone, and the 3.9 floor limits what it could modernize anyway.
+select = ["E4", "E7", "E9", "F", "I", "B"]
+ignore = [
+    "B008", # function call in default arg — Flask/dataclass idiom used here on purpose
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The web layer intentionally imports app settings after the module docstring block.
+"job_agent/web.py" = ["E402"]

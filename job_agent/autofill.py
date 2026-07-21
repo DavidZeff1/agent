@@ -152,18 +152,18 @@ def _name_parts(profile: Profile) -> tuple:
 
 def _basic_answer(profile: Profile, label: str, cover_letter: str) -> Optional[str]:
     """Deterministic answers for the fields every form asks. Returns None when unsure."""
-    l = " ".join(label.lower().split())
+    text = " ".join(label.lower().split())
     c = profile.contact
     first, last = _name_parts(profile)
 
     def has(*words):
-        return any(w in l for w in words)
+        return any(w in text for w in words)
 
     if has("first name", "given name"):
         return first
     if has("last name", "family name", "surname"):
         return last
-    if has("full name") or l in ("name", "name *", "your name"):
+    if has("full name") or text in ("name", "name *", "your name"):
         return profile.full_name or profile.preferred_name
     if has("preferred name"):
         return profile.preferred_name or first
@@ -181,18 +181,18 @@ def _basic_answer(profile: Profile, label: str, cover_letter: str) -> Optional[s
         return profile.links.portfolio or profile.links.website or None
     if has("website", "personal site"):
         return profile.links.website or profile.links.portfolio or None
-    if len(l) < 45 and has("current company", "current employer", "employer", "organization", "company you work"):
+    if len(text) < 45 and has("current company", "current employer", "employer", "organization", "company you work"):
         return profile.experience[0].company if profile.experience else None
-    if len(l) < 45 and has("current title", "current role", "job title") and not has("desired"):
+    if len(text) < 45 and has("current title", "current role", "job title") and not has("desired"):
         return profile.experience[0].title if profile.experience else profile.headline or None
     if has("city") and not has("authorized", "eligible"):
         return c.city or None
-    if has("location") and len(l) < 40:
+    if has("location") and len(text) < 40:
         loc = ", ".join(x for x in [c.city, c.state, c.country] if x)
         return loc or None
     if has("zip", "postal"):
         return c.postal_code or None
-    if has("country") and len(l) < 30:
+    if has("country") and len(text) < 30:
         return c.country or None
     if has("salary", "compensation") and profile.preferences.salary_min:
         p = profile.preferences
@@ -232,14 +232,14 @@ def _pick_option(options: List[str], want_yes: Optional[bool] = None, want_text:
 
 def _choice_intent(profile: Profile, label: str) -> tuple:
     """What we'd answer for a choice question: (want_yes, want_text, allow_decline)."""
-    l = " ".join(label.lower().split())
+    text = " ".join(label.lower().split())
     d = profile.demographics
     auth = profile.work_authorizations[0] if profile.work_authorizations else None
 
     def has(*words):
-        return any(w in l for w in words)
+        return any(w in text for w in words)
 
-    if has("sponsor", "sponsorship") or ("visa" in l and "require" in l):
+    if has("sponsor", "sponsorship") or ("visa" in text and "require" in text):
         return (auth.requires_sponsorship if auth else None), None, False
     if has("authorized to work", "legally authorized", "eligible to work", "right to work"):
         return ((not auth.requires_sponsorship) if auth else None), None, False

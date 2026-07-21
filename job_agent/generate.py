@@ -297,7 +297,7 @@ def render_resume(profile: Profile, tailoring: Optional[dict] = None, markdown: 
 
     if profile.languages:
         L.append(heading(H["languages"]))
-        L.append(", ".join(f"{l.language} ({l.proficiency})" for l in profile.languages if l.language))
+        L.append(", ".join(f"{lang.language} ({lang.proficiency})" for lang in profile.languages if lang.language))
 
     return "\n".join(L).strip() + "\n"
 
@@ -459,8 +459,8 @@ def render_resume_html(profile: Profile, tailoring: Optional[dict] = None) -> st
 
     if profile.languages:
         B.append(f"<h2>{H['languages']}</h2>")
-        B.append("<p>" + " · ".join(_bdi(f"{l.language} ({l.proficiency})".replace(" ()", ""))
-                                    for l in profile.languages if l.language) + "</p>")
+        B.append("<p>" + " · ".join(_bdi(f"{lang.language} ({lang.proficiency})".replace(" ()", ""))
+                                    for lang in profile.languages if lang.language) + "</p>")
 
     return _html_doc("".join(B))
 
@@ -586,7 +586,7 @@ def generate_application(profile: Profile, job: Job, out_dir, llm=None, progress
     # Reviewer agent: fact-check the draft against the profile, repair once if needed.
     review = {"checked": False, "issues": [], "fixed": False}
     if tailoring is not None:
-        note(f"Fact-checking the documents against your profile…")
+        note("Fact-checking the documents against your profile…")
         review = review_tailoring(profile, job, tailoring, llm)
         if review["checked"] and review["issues"]:
             note(f"Fixing {len(review['issues'])} issue(s) the reviewer found…")

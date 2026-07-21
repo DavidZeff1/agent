@@ -177,7 +177,6 @@ class Profile:
 
     def years_of_experience(self) -> float:
         """Rough total from experience date ranges (best-effort; used only as a heuristic)."""
-        import re
 
         total = 0.0
         for exp in self.experience:

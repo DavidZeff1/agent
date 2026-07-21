@@ -63,7 +63,6 @@ def deterministic_score(profile: Profile, job: Job) -> dict:
         title_tokens |= _tokens(t)
 
     job_text = job.search_text()
-    job_tokens = _tokens(job_text)
 
     # 1) Skill overlap (matched skills present in the posting)
     matched = sorted(s for s in skills if s in job_text)
@@ -79,7 +78,7 @@ def deterministic_score(profile: Profile, job: Job) -> dict:
     # 3) Location / remote fit
     prefs = profile.preferences
     loc_l = (job.location or "").lower()
-    matches_pref = bool(prefs.desired_locations) and any(l.lower() in loc_l for l in prefs.desired_locations)
+    matches_pref = bool(prefs.desired_locations) and any(p.lower() in loc_l for p in prefs.desired_locations)
     matches_country = bool(profile.contact.country) and profile.contact.country.lower() in loc_l
     if job.remote and prefs.remote_ok:
         # "remote" is only fully portable if it isn't geo-restricted to a region the user isn't in.

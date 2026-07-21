@@ -15,7 +15,6 @@ ashby / smartrecruiters, so fetching hits the right API directly with no re-prob
 """
 from __future__ import annotations
 
-import json
 import time
 from typing import List, Optional, Tuple
 

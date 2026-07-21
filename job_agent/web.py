@@ -11,7 +11,10 @@ the "copy this answer into the form" workflow live one tab away from the real jo
 """
 from __future__ import annotations
 
+import functools
 import os
+import shutil
+import tempfile
 import threading
 import time
 import webbrowser
@@ -20,9 +23,8 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from . import generate as gen
-from . import matching
+from . import matching, scraper, tracker, util
 from . import profile_store as ps
-from . import scraper, tracker, util
 from .config import IS_HOSTED, get_settings, home
 from .llm import GroqLLM, LLMError, get_llm, llm_available
 from .profile_store import Profile
@@ -38,11 +40,25 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 from .config import APP_SETTINGS_DEFAULTS, load_app_settings  # noqa: E402
 
 
+def _coerce(default, value):
+    """Cast an incoming settings value to the default's type.
+
+    ``bool`` needs its own branch: ``bool("false")`` is ``True``, so a plain
+    ``type(default)(value)`` would silently switch a flag *on* when the browser sends
+    a string.
+    """
+    if isinstance(default, bool):
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+    return type(default)(value)
+
+
 def save_app_settings(new: dict) -> dict:
     cfg = load_app_settings()
     for k in APP_SETTINGS_DEFAULTS:
         if k in new:
-            cfg[k] = type(APP_SETTINGS_DEFAULTS[k])(new[k])
+            cfg[k] = _coerce(APP_SETTINGS_DEFAULTS[k], new[k])
     get_settings().ensure_home()
     util.write_json(str(home() / "settings.json"), cfg)
     return cfg
@@ -89,6 +105,8 @@ _PROGRESS = {"text": "", "ts": 0.0}
 
 
 def _set_progress(text: str) -> None:
+    if IS_HOSTED:
+        return  # process-global, so hosted it would show one visitor's note to the next
     _PROGRESS["text"] = text
     _PROGRESS["ts"] = time.time()
 
@@ -180,7 +198,7 @@ def _profile_from(data: dict) -> Profile:
 
 def _ranked_payload(ranked: list[dict]) -> list[dict]:
     """Trim a ranking to what the UI needs (full descriptions stay in the cache)."""
-    seen = tracker.load()
+    seen = {} if IS_HOSTED else tracker.load()  # hosted: job history lives in the browser
     out = []
     for e in ranked:
         j = e["job"]
@@ -212,14 +230,37 @@ def _ranked_payload(ranked: list[dict]) -> list[dict]:
     return out
 
 
+def local_only(what: str):
+    """Refuse a route in hosted mode, because it reads or writes machine-wide state.
+
+    Hosted mode is multi-tenant in a way desktop mode never is: ``JOB_AGENT_HOME`` points at
+    ``/tmp`` on a serverless instance, and one warm instance serves unrelated visitors one
+    after another. Anything written there — a profile, a tracker, a prepared application —
+    would otherwise be readable by whoever lands on that instance next. The browser holds
+    per-visitor state instead (see ``app.js``), so these endpoints simply don't exist hosted.
+    """
+
+    def decorate(fn):
+        @functools.wraps(fn)
+        def guarded(*args, **kwargs):
+            if IS_HOSTED:
+                return jsonify({"error": f"{what} is part of the desktop app. The hosted version "
+                                         "keeps everything in your own browser instead."}), 404
+            return fn(*args, **kwargs)
+
+        return guarded
+
+    return decorate
+
+
 def _write_env_key(key: str) -> None:
     """Persist GROQ_API_KEY to JOB_AGENT_HOME/.env (kept out of the project folder)."""
     get_settings().ensure_home()
     path = home() / ".env"
     lines: list[str] = []
     if path.is_file():
-        lines = [l for l in path.read_text(encoding="utf-8").splitlines()
-                 if not l.strip().startswith("GROQ_API_KEY")]
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines()
+                 if not line.strip().startswith("GROQ_API_KEY")]
     if key:
         lines.append(f"GROQ_API_KEY={key}")
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
@@ -241,7 +282,8 @@ def create_app() -> Flask:
     # Build stamp = newest static file's mtime. The page carries it in a meta tag and the
     # API reports it; when they disagree (a stale tab or cached page), the page reloads
     # itself fresh — nobody should ever have to know what a hard refresh is.
-    build = str(int(max(p.stat().st_mtime for p in STATIC_DIR.glob("*.*"))))
+    mtimes = [p.stat().st_mtime for p in STATIC_DIR.glob("*.*")]
+    build = str(int(max(mtimes))) if mtimes else "dev"  # empty static dir -> don't crash at import
     app.config["JA_BUILD"] = build
 
     @app.get("/")
@@ -253,7 +295,11 @@ def create_app() -> Flask:
 
     @app.get("/api/status")
     def status():
-        profile = ps.load_profile()
+        # Hosted: report nothing machine-wide. The browser owns the profile, the tracker and
+        # the source config there, and reading them off the instance would mean reading
+        # whoever used it last. (_replace_stale_job_agent probes for "home" and "tracker",
+        # so both keys stay present either way.)
+        profile = None if IS_HOSTED else ps.load_profile()
         s = get_settings()
         return jsonify({
             "hosted": IS_HOSTED,
@@ -264,18 +310,20 @@ def create_app() -> Flask:
             "model": s.model,
             "home": str(s.home),
             "sources": _active_source_count(),
-            "tracker": tracker.counts(),
-            "autorun": util.read_json(_autorun_path(), default={}) or {},
-            "settings": load_app_settings(),
+            "tracker": {} if IS_HOSTED else tracker.counts(),
+            "autorun": {} if IS_HOSTED else (util.read_json(_autorun_path(), default={}) or {}),
+            "settings": dict(APP_SETTINGS_DEFAULTS) if IS_HOSTED else load_app_settings(),
         })
 
     @app.get("/api/results")
+    @local_only("Saved search results are")
     def results():
         c = _ctx(want_llm=False)
         ranked = c.load_ranked()
         return jsonify({"count": len(ranked), "results": _ranked_payload(ranked)})
 
     @app.post("/api/track")
+    @local_only("The application tracker is")
     def track():
         data = request.get_json(force=True, silent=True) or {}
         job_id = str(data.get("job_id", ""))
@@ -287,10 +335,12 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "status": entry["status"]})
 
     @app.get("/api/settings")
+    @local_only("Saved settings are")
     def get_app_settings():
         return jsonify(load_app_settings())
 
     @app.post("/api/settings")
+    @local_only("Saved settings are")
     def post_app_settings():
         data = request.get_json(force=True, silent=True) or {}
         try:
@@ -299,6 +349,7 @@ def create_app() -> Flask:
             return jsonify({"error": "Invalid settings values."}), 400
 
     @app.post("/api/autosearch/run")
+    @local_only("Scheduled searching is")
     def autosearch_now():
         return jsonify(run_auto_search())
 
@@ -333,9 +384,14 @@ def create_app() -> Flask:
 
     @app.get("/api/profile")
     def get_profile():
+        # Hosted: always the blank template. The real profile lives in the visitor's
+        # localStorage; the stored one belongs to whoever used this instance last.
+        if IS_HOSTED:
+            return jsonify(Profile().to_dict())
         return jsonify((ps.load_profile() or Profile()).to_dict())
 
     @app.post("/api/profile")
+    @local_only("Saving your profile on the server is")
     def save_profile():
         data = request.get_json(force=True, silent=True) or {}
         profile = Profile.from_dict(data)
@@ -390,10 +446,12 @@ def create_app() -> Flask:
             config=_source_config(data),
             llm=_req_llm(),
         )
-        c.save_jobs(jobs)
         ranked = matching.rank_jobs(c.profile, jobs)
-        c.save_ranked(ranked)
-        new_count = tracker.record_seen([e["job"] for e in ranked])
+        new_count = 0
+        if not IS_HOSTED:  # hosted: the browser caches the jobs and counts what's new itself
+            c.save_jobs(jobs)
+            c.save_ranked(ranked)
+            new_count = tracker.record_seen([e["job"] for e in ranked])
         return jsonify({"keywords": keywords, "count": len(ranked), "new": new_count,
                         "results": _ranked_payload(ranked)})
 
@@ -411,7 +469,8 @@ def create_app() -> Flask:
         if not jobs:
             return jsonify({"error": "Search for jobs first."}), 400
         ranked = matching.rank_jobs(c.profile, jobs, use_llm=True, llm=llm)
-        c.save_ranked(ranked)
+        if not IS_HOSTED:
+            c.save_ranked(ranked)
         return jsonify({"count": len(ranked), "results": _ranked_payload(ranked)})
 
     # -- applications -----------------------------------------------------------
@@ -432,27 +491,36 @@ def create_app() -> Flask:
             if job_id not in by_id:
                 return jsonify({"error": "That job is no longer in the current search. Search again."}), 404
             job = Job.from_dict(by_id[job_id])
-        s = get_settings().ensure_home()
         _set_progress(f"Reading the {job.company} posting…")
+        # A finished packet is the most sensitive thing this app produces — a resume and cover
+        # letter carrying the visitor's name, email and phone. Hosted, it goes to a throwaway
+        # directory and is handed back inline, so none of it outlives the request on an
+        # instance that will serve someone else next.
+        scratch = tempfile.mkdtemp(prefix="ja-apply-") if IS_HOSTED else None
+        out_dir = scratch or get_settings().ensure_home().applications_dir
         try:
-            paths = gen.generate_application(profile, job, s.applications_dir,
+            paths = gen.generate_application(profile, job, out_dir,
                                              llm=_req_llm() if want_tailor else None,
                                              progress=_set_progress)
+            resp = {
+                "ok": True,
+                "tailored": paths["tailored"],
+                "folder": os.path.basename(paths["dir"]),
+                "job": f"{job.title} @ {job.company}",
+            }
+            if data.get("inline"):  # hosted mode: return the whole packet for browser storage
+                meta = util.read_json(paths["answers_json"], default={}) or {}
+                resp["packet"] = {**meta, **paths.get("content", {})}
         finally:
             _set_progress("")
-        tracker.set_status(job.id, "prepared", title=job.title, company=job.company, url=job.url)
-        resp = {
-            "ok": True,
-            "tailored": paths["tailored"],
-            "folder": os.path.basename(paths["dir"]),
-            "job": f"{job.title} @ {job.company}",
-        }
-        if data.get("inline"):  # hosted mode: return the whole packet for browser storage
-            meta = util.read_json(paths["answers_json"], default={}) or {}
-            resp["packet"] = {**meta, **paths.get("content", {})}
+            if scratch:
+                shutil.rmtree(scratch, ignore_errors=True)
+        if not IS_HOSTED:
+            tracker.set_status(job.id, "prepared", title=job.title, company=job.company, url=job.url)
         return jsonify(resp)
 
     @app.get("/api/applications")
+    @local_only("Prepared applications are")
     def applications():
         d = get_settings().applications_dir
         out = []
@@ -475,6 +543,7 @@ def create_app() -> Flask:
         return jsonify({"applications": out})
 
     @app.get("/api/application/<name>")
+    @local_only("Prepared applications are")
     def application_detail(name: str):
         d = get_settings().applications_dir.resolve()
         folder = (d / name).resolve()
@@ -507,6 +576,7 @@ def create_app() -> Flask:
                  "cover_letter.md", "application_form.md", "job.md"}
 
     @app.get("/api/application/<name>/file/<fn>")
+    @local_only("Downloadable application files are")
     def application_file(name: str, fn: str):
         d = get_settings().applications_dir.resolve()
         folder = (d / name).resolve()
